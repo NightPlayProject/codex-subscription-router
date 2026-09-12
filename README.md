@@ -262,16 +262,21 @@ starts another sign-in.
 | Situation | Behaviour |
 | --- | --- |
 | New chat | Uses the selected preferred subscription when it has capacity; otherwise assigned by quota-at-risk, banked resets, and short-window pressure |
-| Follow-up | Sent to the thread's persisted account owner |
+| Follow-up with Automatic selected | Sent to the thread's persisted account owner |
+| Follow-up with a subscription selected | Safely resumes the chat on the selected subscription before sending the next turn, then persists that subscription as the new owner |
 | Owner depleted | Continued through another account with capacity |
 | Every account depleted | Combined quota alert with the next known reset |
 | Account disabled | Excluded from routing and pooled usable quota |
 
 The subscription assigned to the current thread appears in its pinned summary.
-On Windows, the subscription panel also includes **New Codex chats use** with
-**Automatic** plus each enabled subscription. This preference affects only new
-threads; existing threads keep their persisted owner, and an unavailable or
-depleted preferred subscription safely falls back to automatic routing.
+On Windows, the subscription panel also includes **Codex chats use** with
+**Automatic** plus each enabled subscription. **Automatic** keeps existing
+threads on their persisted owner. Selecting a subscription also applies to an
+existing chat the next time you send a message: the router reads that chat's
+resumable history, resumes it on the selected subscription, and only then
+updates the persisted owner. An unavailable or depleted selected subscription
+safely keeps the current owner; normal quota failover still applies if that
+owner is also depleted.
 
 ## Profiles, plugins, and resets
 

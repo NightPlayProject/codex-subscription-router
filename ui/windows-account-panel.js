@@ -252,7 +252,7 @@
 	  const routingLabel = document.createElement("div");
 	  routingLabel.className = "cmx-muted";
 	  routingLabel.style.marginTop = "10px";
-	  routingLabel.textContent = "New Codex chats use";
+	  routingLabel.textContent = "Codex chats use";
 	  const routingSelect = document.createElement("select");
 	  routingSelect.className = "cmx-select";
 	  const automatic = document.createElement("option");

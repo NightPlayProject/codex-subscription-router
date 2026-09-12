@@ -65,6 +65,10 @@ Run these checks only on the exact Windows package recorded in
 - Confirm the subscription panel loads and the control API remains loopback
   only. Exercise account add/enable/disable and sticky routing with test
   subscriptions before calling routing behavior production-ready.
+- With an existing chat owned by Primary, select Subscription 2 and send one
+  new turn. Confirm the chat resumes on Subscription 2, its history remains
+  intact, and subsequent turns stay on Subscription 2. Switch back to
+  Automatic and confirm no migration occurs on the next turn.
 - Test Windows Computer Use independently. Do not infer Computer Use support
   from ASAR staging, mux health, or ordinary desktop launch alone.
 

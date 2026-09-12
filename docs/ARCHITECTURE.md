@@ -26,6 +26,13 @@ Once a thread ID is known, `state.json` persists its owner. Requests, responses,
 approvals, and notifications are rewritten only as needed to preserve one
 coherent desktop session.
 
+On Windows, an explicit subscription selection is also honored for existing
+threads at the next `turn/start`. The multiplexer reads the thread from its
+current owner, resumes the same history on the selected account, persists the
+new owner only after resume succeeds, and then forwards the turn. `Automatic`
+leaves existing sticky ownership unchanged. Passive thread reads and lists do
+not trigger migration.
+
 If the owner is depleted, the multiplexer resumes the rollout on an account
 with capacity and updates ownership. Threads do not migrate for ordinary load
 balancing.

@@ -75,6 +75,9 @@ type Multiplexer struct {
 	eventsMu sync.RWMutex
 	events   map[chan Event]struct{}
 
+	threadRouteMu    sync.Mutex
+	threadRouteLocks map[string]*sync.Mutex
+
 	profileMu     sync.Mutex
 	profileClient *http.Client
 	profileCache  map[string]profileCacheEntry
@@ -106,6 +109,7 @@ func New(options Options) (*Multiplexer, error) {
 		externalRoutes:       make(map[string]externalRoute),
 		serverRoutes:         make(map[string]serverRequestRoute),
 		events:               make(map[chan Event]struct{}),
+		threadRouteLocks:     make(map[string]*sync.Mutex),
 		profileClient:        &http.Client{Timeout: 10 * time.Second},
 		profileCache:         make(map[string]profileCacheEntry),
 		now:                  time.Now,
@@ -322,6 +326,40 @@ func (m *Multiplexer) routeAggregatedRateLimits(message protocol.Message) {
 func (m *Multiplexer) routeTurnStart(message protocol.Message, threadID, ownerID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*requestTimeout)
 	defer cancel()
+	unlock := m.lockThreadRoute(threadID)
+	defer unlock()
+
+	// Re-read ownership after taking the per-thread lock. Another turn may have
+	// migrated the thread while this request was waiting.
+	if currentOwnerID, ok := m.store.ThreadOwner(threadID); ok {
+		ownerID = currentOwnerID
+	}
+	if preferred, ok := m.preferredThreadAccount(ownerID); ok {
+		snapshot, err := m.accountSnapshotWithProfile(ctx, preferred.ID, false)
+		if err == nil && accountHasCapacity(snapshot) {
+			if err := m.moveThreadToAccount(ctx, threadID, ownerID, preferred.ID); err != nil {
+				m.write(protocol.Failure(message.ID, -32027, fmt.Sprintf("move chat to %s: %v", preferred.Label, err)))
+				return
+			}
+			if err := m.forward(preferred.ID, message); err != nil {
+				m.write(protocol.Failure(message.ID, -32023, err.Error()))
+				return
+			}
+			m.publish(Event{
+				Type:      "thread-subscription-changed",
+				AccountID: preferred.ID,
+				Message:   fmt.Sprintf("Chat moved to %s", preferred.Label),
+				Data:      map[string]any{"threadId": threadID, "previousAccountId": ownerID},
+			})
+			return
+		}
+		m.publish(Event{
+			Type:      "routing-preference-unavailable",
+			AccountID: preferred.ID,
+			Message:   fmt.Sprintf("%s is unavailable or out of capacity; this chat kept its current subscription", preferred.Label),
+			Data:      map[string]any{"threadId": threadID, "currentAccountId": ownerID},
+		})
+	}
 	snapshot, err := m.accountSnapshotWithProfile(ctx, ownerID, false)
 	if err != nil || accountHasCapacity(snapshot) {
 		if err := m.forward(ownerID, message); err != nil {
@@ -331,6 +369,30 @@ func (m *Multiplexer) routeTurnStart(message protocol.Message, threadID, ownerID
 	}
 	excluded := map[string]struct{}{ownerID: {}}
 	m.failoverTurn(ctx, message, threadID, ownerID, excluded)
+}
+
+func (m *Multiplexer) preferredThreadAccount(ownerID string) (state.Account, bool) {
+	preferredID := m.store.PreferredNewThreadAccountID()
+	if preferredID == "" || preferredID == ownerID {
+		return state.Account{}, false
+	}
+	account, ok := m.store.Account(preferredID)
+	if !ok || !account.Enabled {
+		return state.Account{}, false
+	}
+	return account, true
+}
+
+func (m *Multiplexer) lockThreadRoute(threadID string) func() {
+	m.threadRouteMu.Lock()
+	lock := m.threadRouteLocks[threadID]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		m.threadRouteLocks[threadID] = lock
+	}
+	m.threadRouteMu.Unlock()
+	lock.Lock()
+	return lock.Unlock
 }
 
 func (m *Multiplexer) failoverTurn(
@@ -345,12 +407,8 @@ func (m *Multiplexer) failoverTurn(
 		m.write(m.allSubscriptionsDepleted(ctx, message.ID))
 		return
 	}
-	if err := m.resumeThreadOnAccount(ctx, threadID, sourceAccountID, fallback.ID); err != nil {
+	if err := m.moveThreadToAccount(ctx, threadID, sourceAccountID, fallback.ID); err != nil {
 		m.write(protocol.Failure(message.ID, -32027, fmt.Sprintf("move chat to %s: %v", fallback.Label, err)))
-		return
-	}
-	if err := m.store.SetThreadOwner(threadID, fallback.ID); err != nil {
-		m.write(protocol.Failure(message.ID, -32028, err.Error()))
 		return
 	}
 	if err := m.forwardWithExclusions(fallback.ID, message, excluded); err != nil {
@@ -363,6 +421,19 @@ func (m *Multiplexer) failoverTurn(
 		Message:   fmt.Sprintf("Chat continued with %s", fallback.Label),
 		Data:      map[string]any{"threadId": threadID, "previousAccountId": sourceAccountID},
 	})
+}
+
+func (m *Multiplexer) moveThreadToAccount(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
+	if sourceAccountID == targetAccountID {
+		return nil
+	}
+	if err := m.resumeThreadOnAccount(ctx, threadID, sourceAccountID, targetAccountID); err != nil {
+		return err
+	}
+	if err := m.store.SetThreadOwner(threadID, targetAccountID); err != nil {
+		return fmt.Errorf("persist chat subscription: %w", err)
+	}
+	return nil
 }
 
 func (m *Multiplexer) resumeThreadOnAccount(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
