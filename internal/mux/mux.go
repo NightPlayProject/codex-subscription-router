@@ -100,7 +100,7 @@ func New(options Options) (*Multiplexer, error) {
 	}
 	return &Multiplexer{
 		realExecutable:       options.RealExecutable,
-		realArgs:             append([]string(nil), options.RealArgs...),
+		realArgs:             withImmediateThreadUnload(options.RealArgs),
 		environment:          append([]string(nil), options.Environment...),
 		store:                options.Store,
 		output:               options.Output,
@@ -424,10 +424,20 @@ func (m *Multiplexer) failoverTurn(
 }
 
 func (m *Multiplexer) moveThreadToAccount(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
+	return m.moveThreadToAccountWithResume(ctx, threadID, sourceAccountID, targetAccountID, m.resumeThreadOnAccount)
+}
+
+func (m *Multiplexer) moveThreadToAccountWithResume(
+	ctx context.Context,
+	threadID string,
+	sourceAccountID string,
+	targetAccountID string,
+	resume func(context.Context, string, string, string) error,
+) error {
 	if sourceAccountID == targetAccountID {
 		return nil
 	}
-	if err := m.resumeThreadOnAccount(ctx, threadID, sourceAccountID, targetAccountID); err != nil {
+	if err := resume(ctx, threadID, sourceAccountID, targetAccountID); err != nil {
 		return err
 	}
 	if err := m.store.SetThreadOwner(threadID, targetAccountID); err != nil {
@@ -437,6 +447,14 @@ func (m *Multiplexer) moveThreadToAccount(ctx context.Context, threadID, sourceA
 }
 
 func (m *Multiplexer) resumeThreadOnAccount(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
+	sourceAccount, ok := m.store.Account(sourceAccountID)
+	if !ok {
+		return fmt.Errorf("source subscription metadata is unavailable")
+	}
+	targetAccount, ok := m.store.Account(targetAccountID)
+	if !ok {
+		return fmt.Errorf("target subscription metadata is unavailable")
+	}
 	source, ok := m.child(sourceAccountID)
 	if !ok {
 		return fmt.Errorf("source subscription is unavailable")
@@ -445,37 +463,14 @@ func (m *Multiplexer) resumeThreadOnAccount(ctx context.Context, threadID, sourc
 	if !ok {
 		return fmt.Errorf("target subscription is unavailable")
 	}
-	readParams, _ := json.Marshal(map[string]any{"threadId": threadID, "includeTurns": true})
-	readResponse, err := source.Request(ctx, "thread/read", readParams)
-	if err != nil {
-		return fmt.Errorf("read existing chat: %w", err)
-	}
-	var readResult struct {
-		Thread struct {
-			ID            string `json:"id"`
-			Path          string `json:"path"`
-			CWD           string `json:"cwd"`
-			ModelProvider string `json:"modelProvider"`
-		} `json:"thread"`
-	}
-	if err := json.Unmarshal(readResponse.Result, &readResult); err != nil {
-		return fmt.Errorf("decode existing chat: %w", err)
-	}
-	if readResult.Thread.ID == "" || readResult.Thread.Path == "" {
-		return errors.New("existing chat has no resumable history path")
-	}
-	resumeParams, _ := json.Marshal(map[string]any{
-		"threadId":      threadID,
-		"history":       nil,
-		"path":          readResult.Thread.Path,
-		"cwd":           readResult.Thread.CWD,
-		"model":         nil,
-		"modelProvider": readResult.Thread.ModelProvider,
-	})
-	if _, err := target.Request(ctx, "thread/resume", resumeParams); err != nil {
-		return fmt.Errorf("resume existing chat: %w", err)
-	}
-	return nil
+	return resumeThreadBetweenAccounts(
+		ctx,
+		threadID,
+		sourceAccount.CodexHome,
+		targetAccount.CodexHome,
+		source,
+		target,
+	)
 }
 
 func (m *Multiplexer) handleServerRequestResponse(message protocol.Message) {
