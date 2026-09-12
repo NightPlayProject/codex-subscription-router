@@ -14,7 +14,11 @@ function Invoke-Checked {
     [Parameter(Mandatory = $true)][string]$FilePath,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments
   )
-  & $FilePath @Arguments
+  # Send child-process output directly to the console. If this function is
+  # called inside another function whose return value is assigned, leaving the
+  # output on PowerShell's success stream would accidentally become part of
+  # that return value (for example Git's "Already up to date." text).
+  & $FilePath @Arguments | Out-Host
   if ($LASTEXITCODE -ne 0) {
     throw "$FilePath failed with exit code $LASTEXITCODE"
   }
