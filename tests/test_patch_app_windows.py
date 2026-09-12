@@ -23,6 +23,15 @@ class WindowsPatcherTests(unittest.TestCase):
             r"'C:\Users\O''Brien\Codex Router'",
         )
 
+    def test_launcher_passes_explicit_chromium_user_data_dir(self) -> None:
+        user_data = Path(r"C:\Users\Example User\AppData\Local\Codex Subscription Router\User Data")
+        script = patcher.launcher_script(user_data)
+
+        self.assertIn(f"$userData = '{user_data}'", script)
+        self.assertIn("$env:CODEX_ELECTRON_USER_DATA_PATH = $userData", script)
+        self.assertIn("$userDataArg = '--user-data-dir=\"' + $userData + '\"'", script)
+        self.assertIn("Start-Process -FilePath $exe -ArgumentList $userDataArg", script)
+
     def test_bootstrap_patch_requires_exact_anchors(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             extracted = Path(temporary)

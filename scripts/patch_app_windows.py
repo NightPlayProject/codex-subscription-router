@@ -53,6 +53,18 @@ def powershell_single_quoted(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def launcher_script(user_data: Path) -> str:
+    return (
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$userData = {powershell_single_quoted(str(user_data))}\n"
+        "$env:CODEX_ELECTRON_USER_DATA_PATH = $userData\n"
+        f"$env:CODEX_MUX_HOME = {powershell_single_quoted(str(DEFAULT_STATE_ROOT))}\n"
+        "$exe = Join-Path $PSScriptRoot 'app\\ChatGPT.exe'\n"
+        "$userDataArg = '--user-data-dir=\"' + $userData + '\"'\n"
+        "Start-Process -FilePath $exe -ArgumentList $userDataArg -WorkingDirectory (Split-Path $exe -Parent)\n"
+    )
+
+
 def run(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, cwd=cwd, check=True, text=True, capture_output=True)
 
@@ -223,14 +235,7 @@ def patch_destination(source: Path, destination: Path, mux_exe: Path) -> None:
 
     launcher = destination.resolve() / "Launch-CodexSubscriptionRouter.ps1"
     user_data = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "Codex Subscription Router" / "User Data"
-    launcher.write_text(
-        "$ErrorActionPreference = 'Stop'\n"
-        f"$env:CODEX_ELECTRON_USER_DATA_PATH = {powershell_single_quoted(str(user_data))}\n"
-        f"$env:CODEX_MUX_HOME = {powershell_single_quoted(str(DEFAULT_STATE_ROOT))}\n"
-        "$exe = Join-Path $PSScriptRoot 'app\\ChatGPT.exe'\n"
-        "Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe -Parent)\n",
-        encoding="utf-8",
-    )
+    launcher.write_text(launcher_script(user_data), encoding="utf-8")
 
     if sha256(source_asar) != SUPPORTED_ASAR_SHA256:
         raise RuntimeError("official source app.asar changed during patching")
