@@ -59,9 +59,11 @@ disables the staged copy's updater, injects the account panel and plugin routing
 scope, and repacks the archive while preserving unpacked native modules.
 
 The launcher sets `CODEX_ELECTRON_USER_DATA_PATH` to a separate profile before
-starting the staged `ChatGPT.exe`. The existing Windows Computer Use/runtime
-files are copied unchanged; the Windows port does not apply the macOS bundle ID,
-Mach-O, entitlement, or code-signing patches.
+starting the staged `ChatGPT.exe`. The staged Windows bootstrap has a fail-closed
+patch that uses `%LOCALAPPDATA%\Codex Subscription Router\User Data` when that
+variable is absent after an internal Electron relaunch. The existing Windows
+Computer Use/runtime files are copied unchanged; the Windows port does not apply
+the macOS bundle ID, Mach-O, entitlement, or code-signing patches.
 
 ## Plugin behavior
 

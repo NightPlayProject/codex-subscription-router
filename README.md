@@ -208,9 +208,11 @@ Launch the independent copy when ready:
 ```
 
 The launcher uses an isolated Electron profile under
-`%LOCALAPPDATA%\Codex Subscription Router\User Data`. To rebuild an existing
-staged copy after source changes, run `install.ps1 -Force`; the previous staged
-copy is moved to a timestamped backup under `~\.codex-mux\backups\windows`.
+`%LOCALAPPDATA%\Codex Subscription Router\User Data`. The Windows bootstrap also
+falls back to that same path if Electron drops the launcher environment variable
+during an internal relaunch. To rebuild an existing staged copy after source
+changes, run `install.ps1 -Force`; the previous staged copy is moved to a
+timestamped backup under `~\.codex-mux\backups\windows`.
 
 ## Grant macOS permissions
 

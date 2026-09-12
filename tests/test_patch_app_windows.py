@@ -30,23 +30,40 @@ class WindowsPatcherTests(unittest.TestCase):
             build.mkdir(parents=True)
             bootstrap = build / "bootstrap-test.js"
             bootstrap.write_text(
-                '"CODEX_ELECTRON_USER_DATA_PATH";"CODEX_ELECTRON_USER_DATA_PATH";'
+                "function w({appDataPath:e,buildFlavor:n,env:r}){let i=r.CODEX_ELECTRON_USER_DATA_PATH?.trim();"
+                "if(i)return(0,o.resolve)(i);let a=t.ko(n),s=(0,o.join)(e,a==null?`Codex`:`Codex (${a})`),"
+                "c=r.CODEX_ELECTRON_AGENT_RUN_ID?.trim()||null;return s};"
+                '"CODEX_ELECTRON_USER_DATA_PATH";'
                 "async function x(){await i.initialize();await i.startUpdaterAfterStartupFailure()}\n",
                 encoding="utf-8",
             )
 
             patched = patcher.patch_bootstrap(extracted)
             data = patched.read_text(encoding="utf-8")
+            self.assertIn("process.platform===`win32`", data)
+            self.assertIn("r.LOCALAPPDATA?.trim()", data)
+            self.assertIn("`Codex Subscription Router`,`User Data`", data)
             self.assertNotIn("await i.initialize()", data)
             self.assertNotIn("await i.startUpdaterAfterStartupFailure()", data)
             self.assertEqual(data.count("await Promise.resolve()"), 2)
 
             bootstrap.write_text(
-                '"CODEX_ELECTRON_USER_DATA_PATH";async function x(){await i.initialize();'
+                "function w({appDataPath:e,buildFlavor:n,env:r}){let i=r.CODEX_ELECTRON_USER_DATA_PATH?.trim();"
+                "if(i)return(0,o.resolve)(i);let a=t.ko(n),s=(0,o.join)(e,a==null?`Codex`:`Codex (${a})`),"
+                "c=r.CODEX_ELECTRON_AGENT_RUN_ID?.trim()||null;return s};"
+                "async function x(){await i.initialize();"
                 "await i.startUpdaterAfterStartupFailure()}\n",
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(RuntimeError, "isolated-profile support"):
+                patcher.patch_bootstrap(extracted)
+
+            bootstrap.write_text(
+                '"CODEX_ELECTRON_USER_DATA_PATH";"CODEX_ELECTRON_USER_DATA_PATH";'
+                "async function x(){await i.initialize();await i.startUpdaterAfterStartupFailure()}\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "Windows isolated-profile anchor"):
                 patcher.patch_bootstrap(extracted)
 
     def test_renderer_patch_adds_loopback_and_scoped_bridge_once(self) -> None:

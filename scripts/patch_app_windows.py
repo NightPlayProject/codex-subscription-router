@@ -122,6 +122,19 @@ def patch_bootstrap(extracted: Path) -> Path:
     data = path.read_text(encoding="utf-8")
     if data.count("CODEX_ELECTRON_USER_DATA_PATH") != 2:
         raise RuntimeError("could not verify isolated-profile support in bootstrap")
+    profile_anchor = (
+        "function w({appDataPath:e,buildFlavor:n,env:r}){let i=r.CODEX_ELECTRON_USER_DATA_PATH?.trim();"
+        "if(i)return(0,o.resolve)(i);let a=t.ko(n),s=(0,o.join)(e,a==null?`Codex`:`Codex (${a})`)"
+    )
+    if data.count(profile_anchor) != 1:
+        raise RuntimeError("could not verify exact Windows isolated-profile anchor")
+    profile_patch = (
+        "function w({appDataPath:e,buildFlavor:n,env:r}){let i=r.CODEX_ELECTRON_USER_DATA_PATH?.trim();"
+        "if(i)return(0,o.resolve)(i);if(process.platform===`win32`){let i=r.LOCALAPPDATA?.trim();"
+        "if(i)return(0,o.join)(i,`Codex Subscription Router`,`User Data`)}"
+        "let a=t.ko(n),s=(0,o.join)(e,a==null?`Codex`:`Codex (${a})`)"
+    )
+    data = data.replace(profile_anchor, profile_patch, 1)
     initialize = "await i.initialize()"
     failure = "await i.startUpdaterAfterStartupFailure()"
     if data.count(initialize) != 1 or data.count(failure) != 1:
