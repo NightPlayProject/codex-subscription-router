@@ -11,11 +11,17 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/b-nnett/codex-subscription-router/internal/protocol"
 )
 
 const sessionMetadataReadLimit = 16 << 20
+
+const (
+	threadUnloadPollInterval = 25 * time.Millisecond
+	threadUnloadWaitLimit    = 2 * time.Second
+)
 
 type appServerRequester interface {
 	Request(context.Context, string, json.RawMessage) (protocol.Message, error)
@@ -106,17 +112,44 @@ func ensureThreadUnloaded(ctx context.Context, child appServerRequester, threadI
 	if err := json.Unmarshal(response.Result, &result); err != nil {
 		return fmt.Errorf("decode unsubscribe response: %w", err)
 	}
-	if result.Status != "unsubscribed" && result.Status != "notLoaded" {
+	switch result.Status {
+	case "notLoaded":
+		return nil
+	case "notSubscribed", "unsubscribed":
+		// Both statuses can race the app-server's unload task. The router starts
+		// child app-servers with thread_unload_delay_secs=0, so wait for the
+		// loaded-thread registry to observe the unload before touching rollout
+		// files. Resuming while the old thread is still loaded would rejoin its
+		// stale in-memory state instead of rebuilding from the copied history.
+	default:
 		return fmt.Errorf("loaded chat could not be unsubscribed: %s", result.Status)
 	}
-	loaded, err = loadedThreadIDs(ctx, child)
-	if err != nil {
-		return err
+	return waitForThreadUnloaded(ctx, child, threadID)
+}
+
+func waitForThreadUnloaded(ctx context.Context, child appServerRequester, threadID string) error {
+	deadline := time.Now().Add(threadUnloadWaitLimit)
+	for {
+		loaded, err := loadedThreadIDs(ctx, child)
+		if err != nil {
+			return err
+		}
+		if !containsThreadID(loaded, threadID) {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			return errors.New("chat remained loaded after unsubscribe")
+		}
+		timer := time.NewTimer(threadUnloadPollInterval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
-	if containsThreadID(loaded, threadID) {
-		return errors.New("chat remained loaded after unsubscribe")
-	}
-	return nil
 }
 
 func loadedThreadIDs(ctx context.Context, child appServerRequester) ([]string, error) {

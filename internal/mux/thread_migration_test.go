@@ -209,6 +209,79 @@ func TestResumeThreadBetweenAccountsUsesTargetLocalPathAndUnloadsStaleTarget(t *
 	}
 }
 
+func TestResumeThreadBetweenAccountsAcceptsNotSubscribedWhileTargetUnloads(t *testing.T) {
+	sourceHome := filepath.Join(t.TempDir(), "primary")
+	targetHome := filepath.Join(t.TempDir(), "secondary")
+	threadID := "01a09619-9a93-7980-8096-80a3541cee68"
+	sourcePath := filepath.Join(sourceHome, "sessions", "2026", "09", "12", "rollout-"+threadID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rollout := []byte(`{"type":"session_meta","payload":{"id":"` + threadID + `","session_id":"` + threadID + `"}}` + "\n")
+	if err := os.WriteFile(sourcePath, rollout, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	source := &fakeRequester{}
+	source.request = func(method string, _ json.RawMessage) (protocol.Message, error) {
+		switch method {
+		case "thread/read":
+			result, _ := json.Marshal(map[string]any{"thread": map[string]any{
+				"id": threadID, "path": sourcePath, "cwd": `C:\\work`, "modelProvider": "openai",
+			}})
+			return protocol.Message{Result: result}, nil
+		case "thread/loaded/list":
+			return protocol.Message{Result: json.RawMessage(`{"data":[]}`)}, nil
+		default:
+			return protocol.Message{}, errors.New("unexpected source request: " + method)
+		}
+	}
+
+	loadedListCalls := 0
+	var resumePath string
+	target := &fakeRequester{}
+	target.request = func(method string, params json.RawMessage) (protocol.Message, error) {
+		switch method {
+		case "thread/loaded/list":
+			loadedListCalls++
+			if loadedListCalls <= 2 {
+				result, _ := json.Marshal(map[string]any{"data": []string{threadID}})
+				return protocol.Message{Result: result}, nil
+			}
+			return protocol.Message{Result: json.RawMessage(`{"data":[]}`)}, nil
+		case "thread/unsubscribe":
+			return protocol.Message{Result: json.RawMessage(`{"status":"notSubscribed"}`)}, nil
+		case "thread/resume":
+			var decoded struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal(params, &decoded); err != nil {
+				return protocol.Message{}, err
+			}
+			resumePath = decoded.Path
+			return protocol.Message{Result: json.RawMessage(`{"thread":{"id":"` + threadID + `"}}`)}, nil
+		default:
+			return protocol.Message{}, errors.New("unexpected target request: " + method)
+		}
+	}
+
+	if err := resumeThreadBetweenAccounts(context.Background(), threadID, sourceHome, targetHome, source, target); err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(targetHome, "sessions", "2026", "09", "12", filepath.Base(sourcePath))
+	if resumePath != wantPath {
+		t.Fatalf("thread/resume path = %q, want target-local %q", resumePath, wantPath)
+	}
+	methods := make([]string, 0, len(target.calls))
+	for _, call := range target.calls {
+		methods = append(methods, call.method)
+	}
+	wantMethods := []string{"thread/loaded/list", "thread/unsubscribe", "thread/loaded/list", "thread/loaded/list", "thread/resume"}
+	if !reflect.DeepEqual(methods, wantMethods) {
+		t.Fatalf("target requests = %#v, want %#v", methods, wantMethods)
+	}
+}
+
 func TestMoveThreadToAccountChangesOwnerOnlyAfterSuccessfulResume(t *testing.T) {
 	root := t.TempDir()
 	store, err := state.Open(filepath.Join(root, "mux"), filepath.Join(root, "primary"))
