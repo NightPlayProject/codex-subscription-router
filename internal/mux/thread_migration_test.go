@@ -238,20 +238,30 @@ func TestResumeThreadBetweenAccountsAcceptsNotSubscribedWhileTargetUnloads(t *te
 	}
 
 	loadedListCalls := 0
+	attached := false
 	var resumePath string
 	target := &fakeRequester{}
 	target.request = func(method string, params json.RawMessage) (protocol.Message, error) {
 		switch method {
 		case "thread/loaded/list":
 			loadedListCalls++
-			if loadedListCalls <= 2 {
+			if !attached || loadedListCalls <= 2 {
 				result, _ := json.Marshal(map[string]any{"data": []string{threadID}})
 				return protocol.Message{Result: result}, nil
 			}
 			return protocol.Message{Result: json.RawMessage(`{"data":[]}`)}, nil
 		case "thread/unsubscribe":
+			if attached {
+				return protocol.Message{Result: json.RawMessage(`{"status":"unsubscribed"}`)}, nil
+			}
 			return protocol.Message{Result: json.RawMessage(`{"status":"notSubscribed"}`)}, nil
+		case "thread/read":
+			return protocol.Message{Result: json.RawMessage(`{"thread":{"id":"` + threadID + `","status":{"type":"idle"}}}`)}, nil
 		case "thread/resume":
+			if !attached {
+				attached = true
+				return protocol.Message{Result: json.RawMessage(`{}`)}, nil
+			}
 			var decoded struct {
 				Path string `json:"path"`
 			}
@@ -276,9 +286,26 @@ func TestResumeThreadBetweenAccountsAcceptsNotSubscribedWhileTargetUnloads(t *te
 	for _, call := range target.calls {
 		methods = append(methods, call.method)
 	}
-	wantMethods := []string{"thread/loaded/list", "thread/unsubscribe", "thread/loaded/list", "thread/loaded/list", "thread/resume"}
+	wantMethods := []string{"thread/loaded/list", "thread/unsubscribe", "thread/read", "thread/resume", "thread/unsubscribe", "thread/loaded/list", "thread/loaded/list", "thread/resume"}
 	if !reflect.DeepEqual(methods, wantMethods) {
 		t.Fatalf("target requests = %#v, want %#v", methods, wantMethods)
+	}
+}
+
+func TestAttachIdleThreadRejectsActiveAndUnknownState(t *testing.T) {
+	for _, status := range []string{"active", "", "notLoaded"} {
+		t.Run(status, func(t *testing.T) {
+			child := &fakeRequester{request: func(method string, _ json.RawMessage) (protocol.Message, error) {
+				if method != "thread/read" {
+					t.Fatalf("must not reattach %q thread: %s", status, method)
+				}
+				result, _ := json.Marshal(map[string]any{"thread": map[string]any{"id": "chat", "status": map[string]any{"type": status}}})
+				return protocol.Message{Result: result}, nil
+			}}
+			if err := attachIdleThread(context.Background(), child, "chat"); err == nil {
+				t.Fatal("expected unsafe reattachment to be rejected")
+			}
+		})
 	}
 }
 

@@ -115,7 +115,24 @@ func ensureThreadUnloaded(ctx context.Context, child appServerRequester, threadI
 	switch result.Status {
 	case "notLoaded":
 		return nil
-	case "notSubscribed", "unsubscribed":
+	case "notSubscribed":
+		// A loaded runtime without this connection's subscription may have no
+		// listener driving its unload task (for example after a failed resume).
+		// Rejoin it before unsubscribing; do not overwrite its files while loaded.
+		if err := attachIdleThread(ctx, child, threadID); err != nil {
+			return err
+		}
+		response, err := child.Request(ctx, "thread/unsubscribe", params)
+		if err != nil {
+			return fmt.Errorf("unsubscribe reattached chat: %w", err)
+		}
+		if err := json.Unmarshal(response.Result, &result); err != nil {
+			return fmt.Errorf("decode reattached unsubscribe: %w", err)
+		}
+		if result.Status != "unsubscribed" && result.Status != "notLoaded" {
+			return fmt.Errorf("reattached chat could not be unsubscribed: %s", result.Status)
+		}
+	case "unsubscribed":
 		// Both statuses can race the app-server's unload task. The router starts
 		// child app-servers with thread_unload_delay_secs=0, so wait for the
 		// loaded-thread registry to observe the unload before touching rollout
@@ -125,6 +142,33 @@ func ensureThreadUnloaded(ctx context.Context, child appServerRequester, threadI
 		return fmt.Errorf("loaded chat could not be unsubscribed: %s", result.Status)
 	}
 	return waitForThreadUnloaded(ctx, child, threadID)
+}
+
+func attachIdleThread(ctx context.Context, child appServerRequester, threadID string) error {
+	params, _ := json.Marshal(map[string]any{"threadId": threadID, "includeTurns": false})
+	response, err := child.Request(ctx, "thread/read", params)
+	if err != nil {
+		return fmt.Errorf("inspect detached chat: %w", err)
+	}
+	var result struct {
+		Thread struct {
+			ID     string `json:"id"`
+			Status struct {
+				Type string `json:"type"`
+			} `json:"status"`
+		} `json:"thread"`
+	}
+	if err := json.Unmarshal(response.Result, &result); err != nil {
+		return fmt.Errorf("decode detached chat: %w", err)
+	}
+	if result.Thread.ID != threadID || result.Thread.Status.Type != "idle" {
+		return errors.New("target chat must be idle before reconnecting for migration")
+	}
+	params, _ = json.Marshal(map[string]any{"threadId": threadID, "excludeTurns": true})
+	if _, err := child.Request(ctx, "thread/resume", params); err != nil {
+		return fmt.Errorf("reattach detached chat: %w", err)
+	}
+	return nil
 }
 
 func waitForThreadUnloaded(ctx context.Context, child appServerRequester, threadID string) error {
