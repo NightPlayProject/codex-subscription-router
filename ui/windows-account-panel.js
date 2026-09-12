@@ -24,12 +24,40 @@
     return value == null ? "" : String(value);
   }
 
-  function weeklyUsage(account) {
+  function usageWindows(account) {
     const limits = account?.rateLimits;
     const candidates = [limits?.primary, limits?.secondary].filter(Boolean);
-    const weekly = candidates.find((item) => Number(item?.windowDurationMins) >= 6 * 24 * 60);
-    const used = Number(weekly?.usedPercent);
-    return Number.isFinite(used) ? `${Math.max(0, 100 - used).toFixed(0)}% weekly left` : "Usage unavailable";
+    const weekly = candidates
+      .filter((item) => Number(item?.windowDurationMins) >= 6 * 24 * 60)
+      .sort((left, right) => Number(right?.windowDurationMins || 0) - Number(left?.windowDurationMins || 0))[0];
+    const fiveHour = candidates
+      .filter((item) => {
+        const minutes = Number(item?.windowDurationMins);
+        return Number.isFinite(minutes) && minutes >= 270 && minutes <= 330;
+      })
+      .sort((left, right) => Math.abs(Number(left?.windowDurationMins) - 300) - Math.abs(Number(right?.windowDurationMins) - 300))[0];
+
+    return [
+      fiveHour ? { label: "5h", window: fiveHour, resetKind: "time" } : null,
+      weekly ? { label: "Weekly", window: weekly, resetKind: "date" } : null,
+    ].filter(Boolean);
+  }
+
+  function remainingPercent(window) {
+    const used = Number(window?.usedPercent);
+    return Number.isFinite(used) ? Math.max(0, 100 - used) : null;
+  }
+
+  function resetText(window, kind) {
+    const raw = Number(window?.resetsAt);
+    if (!Number.isFinite(raw) || raw <= 0) return "";
+    const value = raw > 1e12 ? raw : raw * 1000;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const formatted = kind === "time"
+      ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date)
+      : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
+    return `resets ${formatted}`;
   }
 
   function ensureStyle() {
@@ -43,7 +71,7 @@
       .cmx-launch{border:1px solid rgba(255,255,255,.18);background:#202020;color:#fff;border-radius:999px;padding:9px 13px;box-shadow:0 10px 30px rgba(0,0,0,.32);cursor:pointer}
       .cmx-panel{width:min(390px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 80px));overflow:auto;margin-bottom:10px;padding:14px;border:1px solid rgba(255,255,255,.15);border-radius:16px;background:rgba(24,24,24,.97);box-shadow:0 18px 50px rgba(0,0,0,.45);backdrop-filter:blur(12px)}
       .cmx-hidden{display:none}.cmx-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.cmx-title{font-size:15px;font-weight:650}.cmx-muted{color:#aaa;font-size:12px}.cmx-error{margin:8px 0;padding:8px;border-radius:9px;background:#4b2020;color:#ffdada;white-space:pre-wrap}
-      .cmx-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid rgba(255,255,255,.08)}.cmx-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cmx-sub{color:#aaa;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cmx-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+      .cmx-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid rgba(255,255,255,.08)}.cmx-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cmx-sub{color:#aaa;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cmx-usage{display:flex;flex-direction:column;gap:1px;margin-top:2px}.cmx-usage-row{display:flex;align-items:baseline;gap:7px;color:#aaa;font-size:12px;min-width:0}.cmx-usage-label{width:44px;flex:0 0 44px;color:#c8c8c8}.cmx-usage-value{color:#e0e0e0;font-variant-numeric:tabular-nums}.cmx-usage-reset{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#888}.cmx-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
       .cmx-btn{border:1px solid rgba(255,255,255,.16);background:#303030;color:#fff;border-radius:9px;padding:6px 8px;cursor:pointer}.cmx-btn:hover{background:#3a3a3a}.cmx-primary{background:#fff;color:#111;border-color:#fff}.cmx-primary:hover{background:#e9e9e9}.cmx-btn:disabled{opacity:.55;cursor:default}
       .cmx-login{margin-top:10px;padding:10px;border-radius:10px;background:#2b2b2b}.cmx-code{font:600 20px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.06em;margin:6px 0}.cmx-select{width:100%;margin-top:8px;background:#2b2b2b;color:#fff;border:1px solid rgba(255,255,255,.16);border-radius:9px;padding:7px}
     `;
@@ -142,11 +170,48 @@
         const name = document.createElement("div");
         name.className = "cmx-name";
         name.textContent = `${text(account.label) || account.id}${account.planLabel ? ` · ${account.planLabel}` : ""}`;
-        const sub = document.createElement("div");
-        sub.className = "cmx-sub";
-        const connection = account.connected ? weeklyUsage(account) : "Not signed in";
-        sub.textContent = `${connection}${account.enabled ? "" : " · disabled"}${account.email ? ` · ${account.email}` : ""}`;
-        details.append(name, sub);
+        details.appendChild(name);
+        if (account.connected) {
+          const windows = usageWindows(account);
+          if (windows.length > 0) {
+            const usage = document.createElement("div");
+            usage.className = "cmx-usage";
+            for (const item of windows) {
+              const row = document.createElement("div");
+              row.className = "cmx-usage-row";
+              const label = document.createElement("span");
+              label.className = "cmx-usage-label";
+              label.textContent = item.label;
+              const value = document.createElement("span");
+              value.className = "cmx-usage-value";
+              const remaining = remainingPercent(item.window);
+              value.textContent = remaining == null ? "–" : `${remaining.toFixed(0)}% left`;
+              const reset = document.createElement("span");
+              reset.className = "cmx-usage-reset";
+              reset.textContent = resetText(item.window, item.resetKind);
+              row.append(label, value);
+              if (reset.textContent) row.appendChild(reset);
+              usage.appendChild(row);
+            }
+            details.appendChild(usage);
+          } else {
+            const unavailable = document.createElement("div");
+            unavailable.className = "cmx-sub";
+            unavailable.textContent = "Usage unavailable";
+            details.appendChild(unavailable);
+          }
+        } else {
+          const signedOut = document.createElement("div");
+          signedOut.className = "cmx-sub";
+          signedOut.textContent = "Not signed in";
+          details.appendChild(signedOut);
+        }
+        if (!account.enabled || account.email) {
+          const meta = document.createElement("div");
+          meta.className = "cmx-sub";
+          meta.textContent = `${account.enabled ? "" : "disabled"}${!account.enabled && account.email ? " · " : ""}${account.email || ""}`;
+          details.appendChild(meta);
+        }
 
         const actions = document.createElement("div");
         actions.className = "cmx-actions";
