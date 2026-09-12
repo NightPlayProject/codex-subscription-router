@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/b-nnett/codex-subscription-router/internal/protocol"
@@ -37,6 +38,49 @@ func TestWithImmediateThreadUnload(t *testing.T) {
 	}
 	if !reflect.DeepEqual(input, []string{"-c", "features.code_mode_host=true", "app-server", "--analytics-default-enabled"}) {
 		t.Fatal("withImmediateThreadUnload mutated the caller's arguments")
+	}
+}
+
+func TestRelativePathInsideAcceptsWindowsExtendedPath(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows path semantics")
+	}
+	root := `C:\Users\KingG\.codex`
+	path := `\\?\C:\Users\KingG\.codex\sessions\2026\09\12\rollout.jsonl`
+	want := `sessions\2026\09\12\rollout.jsonl`
+	got, err := relativePathInside(root, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("relativePathInside() = %q, want %q", got, want)
+	}
+}
+
+func TestRelativePathInsideRejectsWindowsExtendedPathOutsideRoot(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows path semantics")
+	}
+	root := `C:\Users\KingG\.codex`
+	path := `\\?\C:\Users\KingG\.codex-mux\accounts\other\rollout.jsonl`
+	if _, err := relativePathInside(root, path); err == nil {
+		t.Fatal("expected extended path outside the source home to be rejected")
+	}
+}
+
+func TestRelativePathInsideAcceptsWindowsExtendedUNCPath(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows path semantics")
+	}
+	root := `\\server\share\.codex`
+	path := `\\?\UNC\server\share\.codex\sessions\2026\09\12\rollout.jsonl`
+	want := `sessions\2026\09\12\rollout.jsonl`
+	got, err := relativePathInside(root, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("relativePathInside() = %q, want %q", got, want)
 	}
 }
 

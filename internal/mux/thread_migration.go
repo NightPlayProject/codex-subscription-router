@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -230,11 +231,13 @@ func rolloutBelongsToThread(path, threadID string) (bool, error) {
 }
 
 func relativePathInside(root, path string) (string, error) {
-	rootAbsolute, err := filepath.Abs(root)
+	rootForRel := normalizeWindowsExtendedPath(root)
+	pathForRel := normalizeWindowsExtendedPath(path)
+	rootAbsolute, err := filepath.Abs(rootForRel)
 	if err != nil {
 		return "", err
 	}
-	pathAbsolute, err := filepath.Abs(path)
+	pathAbsolute, err := filepath.Abs(pathForRel)
 	if err != nil {
 		return "", err
 	}
@@ -246,6 +249,21 @@ func relativePathInside(root, path string) (string, error) {
 		return "", fmt.Errorf("path %q is outside %q", path, root)
 	}
 	return relative, nil
+}
+
+func normalizeWindowsExtendedPath(path string) string {
+	if runtime.GOOS != "windows" {
+		return path
+	}
+	const extendedPrefix = `\\?\`
+	const extendedUNCPrefix = `\\?\UNC\`
+	if len(path) >= len(extendedUNCPrefix) && strings.EqualFold(path[:len(extendedUNCPrefix)], extendedUNCPrefix) {
+		return `\\` + path[len(extendedUNCPrefix):]
+	}
+	if strings.HasPrefix(path, extendedPrefix) {
+		return path[len(extendedPrefix):]
+	}
+	return path
 }
 
 func firstPathComponent(path string) string {
