@@ -26,20 +26,22 @@ type Account struct {
 }
 
 type persistedState struct {
-	Version     int               `json:"version"`
-	Accounts    []Account         `json:"accounts"`
-	ThreadOwner map[string]string `json:"threadOwner"`
+	Version                     int               `json:"version"`
+	Accounts                    []Account         `json:"accounts"`
+	ThreadOwner                 map[string]string `json:"threadOwner"`
+	PreferredNewThreadAccountID string            `json:"preferredNewThreadAccountId,omitempty"`
 }
 
 // Store persists only routing metadata. OAuth credentials and conversation
 // databases remain inside each account's isolated Codex home.
 type Store struct {
-	mu               sync.RWMutex
-	root             string
-	path             string
-	primaryCodexHome string
-	accounts         []Account
-	owners           map[string]string
+	mu                          sync.RWMutex
+	root                        string
+	path                        string
+	primaryCodexHome            string
+	accounts                    []Account
+	owners                      map[string]string
+	preferredNewThreadAccountID string
 }
 
 func Open(root, primaryCodexHome string) (*Store, error) {
@@ -70,6 +72,7 @@ func Open(root, primaryCodexHome string) (*Store, error) {
 			return nil, fmt.Errorf("unsupported state version %d", persisted.Version)
 		}
 		store.accounts = persisted.Accounts
+		store.preferredNewThreadAccountID = persisted.PreferredNewThreadAccountID
 		if persisted.ThreadOwner != nil {
 			store.owners = persisted.ThreadOwner
 		}
@@ -224,6 +227,35 @@ func (s *Store) ThreadOwner(threadID string) (string, bool) {
 	return owner, ok
 }
 
+func (s *Store) PreferredNewThreadAccountID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.preferredNewThreadAccountID
+}
+
+func (s *Store) SetPreferredNewThreadAccountID(accountID string) error {
+	accountID = strings.TrimSpace(accountID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if accountID != "" {
+		found := false
+		for _, account := range s.accounts {
+			if account.ID == accountID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("account %q not found", accountID)
+		}
+	}
+	if s.preferredNewThreadAccountID == accountID {
+		return nil
+	}
+	s.preferredNewThreadAccountID = accountID
+	return s.saveLocked()
+}
+
 func (s *Store) SetThreadOwner(threadID, accountID string) error {
 	if threadID == "" || accountID == "" {
 		return errors.New("thread and account IDs are required")
@@ -249,9 +281,10 @@ func (s *Store) ThreadCounts() map[string]int {
 
 func (s *Store) saveLocked() error {
 	persisted := persistedState{
-		Version:     stateVersion,
-		Accounts:    s.accounts,
-		ThreadOwner: s.owners,
+		Version:                     stateVersion,
+		Accounts:                    s.accounts,
+		ThreadOwner:                 s.owners,
+		PreferredNewThreadAccountID: s.preferredNewThreadAccountID,
 	}
 	data, err := json.MarshalIndent(persisted, "", "  ")
 	if err != nil {

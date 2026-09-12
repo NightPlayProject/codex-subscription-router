@@ -33,6 +33,9 @@ func TestStoreBootstrapsPrimaryAndPersistsThreadAffinity(t *testing.T) {
 	if err := store.SetThreadOwner("thread-1", added.ID); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.SetPreferredNewThreadAccountID(added.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	reopened, err := Open(filepath.Join(root, "mux"), primaryHome)
 	if err != nil {
@@ -41,6 +44,29 @@ func TestStoreBootstrapsPrimaryAndPersistsThreadAffinity(t *testing.T) {
 	owner, ok := reopened.ThreadOwner("thread-1")
 	if !ok || owner != added.ID {
 		t.Fatalf("thread affinity was not persisted: owner=%q ok=%v", owner, ok)
+	}
+	if got := reopened.PreferredNewThreadAccountID(); got != added.ID {
+		t.Fatalf("new-thread preference was not persisted: got=%q want=%q", got, added.ID)
+	}
+}
+
+func TestPreferredNewThreadAccountRejectsUnknownAccount(t *testing.T) {
+	root := t.TempDir()
+	store, err := Open(root, filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPreferredNewThreadAccountID("missing"); err == nil {
+		t.Fatal("expected unknown account preference to fail")
+	}
+	if err := store.SetPreferredNewThreadAccountID("primary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPreferredNewThreadAccountID(""); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.PreferredNewThreadAccountID(); got != "" {
+		t.Fatalf("expected automatic routing preference, got %q", got)
 	}
 }
 

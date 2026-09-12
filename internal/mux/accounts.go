@@ -124,6 +124,14 @@ func (m *Multiplexer) ThreadAccount(ctx context.Context, threadID string) (Accou
 	return m.accountSnapshotWithProfile(ctx, accountID, true)
 }
 
+func (m *Multiplexer) PreferredNewThreadAccountID() string {
+	return m.store.PreferredNewThreadAccountID()
+}
+
+func (m *Multiplexer) SetPreferredNewThreadAccountID(accountID string) error {
+	return m.store.SetPreferredNewThreadAccountID(accountID)
+}
+
 func (m *Multiplexer) StartLogin(ctx context.Context, id, mode string) (json.RawMessage, error) {
 	if mode != "chatgpt" && mode != "chatgptDeviceCode" {
 		return nil, errors.New("login mode must be chatgpt or chatgptDeviceCode")
@@ -235,10 +243,14 @@ func planLabel(planType string) string {
 }
 
 func (m *Multiplexer) chooseAccount(ctx context.Context) (state.Account, RouteReason, error) {
-	return m.chooseAccountExcluding(ctx, nil)
+	return m.chooseAccountWithPreference(ctx, nil, m.store.PreferredNewThreadAccountID())
 }
 
 func (m *Multiplexer) chooseAccountExcluding(ctx context.Context, excluded map[string]struct{}) (state.Account, RouteReason, error) {
+	return m.chooseAccountWithPreference(ctx, excluded, "")
+}
+
+func (m *Multiplexer) chooseAccountWithPreference(ctx context.Context, excluded map[string]struct{}, preferredAccountID string) (state.Account, RouteReason, error) {
 	snapshots := m.accountSnapshots(ctx, false)
 	type candidate struct {
 		account      state.Account
@@ -325,6 +337,13 @@ collectResetCredits:
 		if entry.resetCredits.EarliestExpiry != nil {
 			expiresAt := *entry.resetCredits.EarliestExpiry
 			entry.reason.ResetCreditExpiresAt = &expiresAt
+		}
+	}
+	if preferredAccountID != "" {
+		for _, entry := range candidates {
+			if entry.account.ID == preferredAccountID {
+				return entry.account, entry.reason, nil
+			}
 		}
 	}
 

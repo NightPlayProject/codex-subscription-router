@@ -250,13 +250,17 @@ starts another sign-in.
 
 | Situation | Behaviour |
 | --- | --- |
-| New chat | Assigned by quota-at-risk, banked resets, and short-window pressure |
+| New chat | Uses the selected preferred subscription when it has capacity; otherwise assigned by quota-at-risk, banked resets, and short-window pressure |
 | Follow-up | Sent to the thread's persisted account owner |
 | Owner depleted | Continued through another account with capacity |
 | Every account depleted | Combined quota alert with the next known reset |
 | Account disabled | Excluded from routing and pooled usable quota |
 
 The subscription assigned to the current thread appears in its pinned summary.
+On Windows, the subscription panel also includes **New Codex chats use** with
+**Automatic** plus each enabled subscription. This preference affects only new
+threads; existing threads keep their persisted owner, and an unavailable or
+depleted preferred subscription safely falls back to automatic routing.
 
 ## Profiles, plugins, and resets
 

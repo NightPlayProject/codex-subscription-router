@@ -74,10 +74,15 @@
     let busy = false;
     let login = null;
     let error = "";
+	let preferredNewThreadAccountId = "";
 
     async function refresh() {
-      const result = await request("/accounts");
-      accounts = result.accounts || [];
+	  const [result, routing] = await Promise.all([
+		request("/accounts"),
+		request("/routing-preference"),
+	  ]);
+	  accounts = result.accounts || [];
+	  preferredNewThreadAccountId = routing.accountId || "";
       const current = globalThis.__codexMuxPluginAccountId;
       if (!current || !accounts.some((account) => account.id === current && account.enabled)) {
         globalThis.__codexMuxPluginAccountId = accounts.find((account) => account.enabled)?.id || null;
@@ -178,6 +183,33 @@
         row.append(details, actions);
         panel.appendChild(row);
       }
+
+	  const routingLabel = document.createElement("div");
+	  routingLabel.className = "cmx-muted";
+	  routingLabel.style.marginTop = "10px";
+	  routingLabel.textContent = "New Codex chats use";
+	  const routingSelect = document.createElement("select");
+	  routingSelect.className = "cmx-select";
+	  const automatic = document.createElement("option");
+	  automatic.value = "";
+	  automatic.textContent = "Automatic";
+	  automatic.selected = preferredNewThreadAccountId === "";
+	  routingSelect.appendChild(automatic);
+	  for (const account of accounts.filter((item) => item.enabled)) {
+		const option = document.createElement("option");
+		option.value = account.id;
+		option.textContent = account.label || account.id;
+		option.selected = preferredNewThreadAccountId === account.id;
+		routingSelect.appendChild(option);
+	  }
+	  routingSelect.addEventListener("change", () => run(async () => {
+		const updated = await request("/routing-preference", {
+		  method: "PUT",
+		  body: JSON.stringify({ accountId: routingSelect.value || "" }),
+		});
+		preferredNewThreadAccountId = updated.accountId || "";
+	  }));
+	  panel.append(routingLabel, routingSelect);
 
       const pluginLabel = document.createElement("div");
       pluginLabel.className = "cmx-muted";

@@ -27,6 +27,7 @@ func New(address, token string, multiplexer *mux.Multiplexer, uiTests bool) *Ser
 	router.HandleFunc("/v1/health", server.health)
 	router.HandleFunc("/v1/accounts", server.accounts)
 	router.HandleFunc("/v1/accounts/", server.accountAction)
+	router.HandleFunc("/v1/routing-preference", server.routingPreference)
 	router.HandleFunc("/v1/thread-account", server.threadAccount)
 	router.HandleFunc("/v1/profile/combined", server.combinedProfile)
 	router.HandleFunc("/v1/events", server.events)
@@ -180,6 +181,32 @@ func (s *Server) accounts(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 		writeJSON(response, http.StatusCreated, map[string]any{"account": account})
+	default:
+		methodNotAllowed(response)
+	}
+}
+
+func (s *Server) routingPreference(response http.ResponseWriter, request *http.Request) {
+	if !s.authorized(request) {
+		writeJSON(response, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+	switch request.Method {
+	case http.MethodGet:
+		writeJSON(response, http.StatusOK, map[string]any{"accountId": s.mux.PreferredNewThreadAccountID()})
+	case http.MethodPut:
+		var input struct {
+			AccountID string `json:"accountId"`
+		}
+		if err := decodeJSON(request, &input); err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		if err := s.mux.SetPreferredNewThreadAccountID(input.AccountID); err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"accountId": s.mux.PreferredNewThreadAccountID()})
 	default:
 		methodNotAllowed(response)
 	}
