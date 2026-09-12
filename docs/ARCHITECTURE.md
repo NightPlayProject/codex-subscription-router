@@ -9,7 +9,7 @@ work.
 
 Codex Subscription Router replaces the copied app's bundled `codex` executable
 with a small Go multiplexer and keeps the original binary beside it as
-`codex.real`.
+`codex.real` on macOS or `codex.real.exe` on Windows.
 
 ## Request routing
 
@@ -39,6 +39,8 @@ Each isolated account forces file-backed CLI and MCP OAuth credentials.
 
 ## Desktop integration
 
+### macOS
+
 The patcher extracts `app.asar`, verifies exact upstream anchors, inserts the
 account UI, disables self-update, and repacks the archive with an updated
 integrity hash. The app receives a separate Chromium profile and URL scheme.
@@ -46,6 +48,20 @@ integrity hash. The app receives a separate Chromium profile and URL scheme.
 The copied Computer Use service, Node runtime, and callers are re-signed under
 one Apple team. The helper uses a separate bundle identity and socket, avoiding
 the official app's privacy grants and app-group container.
+
+### Windows
+
+The Windows installer copies the supported `OpenAI.Codex` Microsoft Store
+package to `%LOCALAPPDATA%\Programs\Codex Subscription Router` and patches only
+that writable copy. The patcher verifies the exact official AppX version and
+ASAR hash, extracts `app.asar`, checks unique bootstrap/renderer anchors,
+disables the staged copy's updater, injects the account panel and plugin routing
+scope, and repacks the archive while preserving unpacked native modules.
+
+The launcher sets `CODEX_ELECTRON_USER_DATA_PATH` to a separate profile before
+starting the staged `ChatGPT.exe`. The existing Windows Computer Use/runtime
+files are copied unchanged; the Windows port does not apply the macOS bundle ID,
+Mach-O, entitlement, or code-signing patches.
 
 ## Plugin behavior
 

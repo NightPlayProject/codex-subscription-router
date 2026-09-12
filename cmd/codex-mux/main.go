@@ -131,9 +131,9 @@ func resolveRealExecutable() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve wrapper executable: %w", err)
 	}
-	realExecutable := filepath.Join(filepath.Dir(executable), "codex.real")
+	realExecutable := filepath.Join(filepath.Dir(executable), realExecutableName())
 	if _, err := os.Stat(realExecutable); err != nil {
-		return "", fmt.Errorf("find bundled codex.real: %w", err)
+		return "", fmt.Errorf("find bundled %s: %w", realExecutableName(), err)
 	}
 	return realExecutable, nil
 }

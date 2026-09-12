@@ -2,15 +2,15 @@
   "name": "codex-subscription-router-patcher",
   "private": true,
   "version": "0.1.0",
-  "description": "Build tooling for the independent Codex Subscription Router macOS app patch",
+  "description": "Build tooling for independent Codex Subscription Router desktop app patches",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/b-nnett/codex-subscription-router.git"
+    "url": "git+https://github.com/NightPlayProject/codex-subscription-router.git"
   },
-  "homepage": "https://github.com/b-nnett/codex-subscription-router#readme",
+  "homepage": "https://github.com/NightPlayProject/codex-subscription-router#readme",
   "bugs": {
-    "url": "https://github.com/b-nnett/codex-subscription-router/issues"
+    "url": "https://github.com/NightPlayProject/codex-subscription-router/issues"
   },
   "engines": {
     "node": ">=22.12"
@@ -18,9 +18,10 @@
   "scripts": {
     "check": "npm run check:go && npm run check:js && npm run check:python && npm run check:shell",
     "check:go": "go test ./... && go vet ./...",
-    "check:js": "node --check ui/account-menu.js && node --check ui/thread-subscription.js && node --check ui/ui-test-bridge.cjs",
-    "check:python": "python3 -m py_compile scripts/patch_app.py scripts/check_release.py",
+    "check:js": "node --check ui/account-menu.js && node --check ui/thread-subscription.js && node --check ui/ui-test-bridge.cjs && node --check ui/windows-account-panel.js",
+    "check:python": "python3 -m py_compile scripts/patch_app.py scripts/patch_app_windows.py scripts/check_release.py tests/test_patch_app_windows.py",
     "check:shell": "bash -n install.sh",
+    "check:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_windows.ps1",
     "release:check": "python3 scripts/check_release.py"
   },
   "devDependencies": {

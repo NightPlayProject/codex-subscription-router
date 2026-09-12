@@ -45,3 +45,28 @@ signature and reuse the same Apple team as the previous installed build.
 
 Record the tested commit, macOS version, signing team ID, and any deviations in
 the release draft before publishing it.
+
+## Windows x64 staging smoke test
+
+Run these checks only on the exact Windows package recorded in
+`docs/COMPATIBILITY.md`.
+
+- Confirm `install.ps1` reports the expected `OpenAI.Codex` package version and
+  exact source `app.asar` SHA-256 before staging.
+- Hash the official `WindowsApps` `app.asar` before and after staging and confirm
+  it is unchanged.
+- Run the staged `resources\codex.exe --version` and confirm it passes through
+  to `resources\codex.real.exe`.
+- Start an isolated staged mux `app-server`, authenticate to `/v1/health` with
+  the generated control token, and confirm the health response is `ok: true`.
+- With the official Store app still running, launch only the staged app through
+  `Launch-CodexSubscriptionRouter.ps1`. Verify any new `ChatGPT.exe` process is
+  loaded from the staged path and uses the isolated user-data directory.
+- Confirm the subscription panel loads and the control API remains loopback
+  only. Exercise account add/enable/disable and sticky routing with test
+  subscriptions before calling routing behavior production-ready.
+- Test Windows Computer Use independently. Do not infer Computer Use support
+  from ASAR staging, mux health, or ordinary desktop launch alone.
+
+Record the tested commit, Windows version, AppX package version, source ASAR
+hash, staged ASAR hash, GUI result, and Computer Use result for each release.

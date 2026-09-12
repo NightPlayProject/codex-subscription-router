@@ -11,6 +11,9 @@ this project uses [Semantic Versioning](https://semver.org/).
   rebuilds, recoverable upgrades, and automatic launch.
 - Reset-aware routing that prioritizes weekly quota at risk of expiring and
   gives a bounded boost to subscriptions with banked usage resets.
+- A fail-closed Windows x64 staging path for the Microsoft Store Codex app,
+  including an isolated profile, Windows process handling, account controls,
+  and exact official package/ASAR verification.
 
 ## [0.1.0] - 2026-08-15
 

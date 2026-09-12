@@ -30,3 +30,9 @@ func TestValidateControlToken(t *testing.T) {
 		}
 	}
 }
+
+func TestRealExecutableName(t *testing.T) {
+	if got := realExecutableName(); got == "" {
+		t.Fatal("realExecutableName() returned an empty name")
+	}
+}

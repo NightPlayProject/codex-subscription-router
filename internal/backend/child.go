@@ -140,7 +140,7 @@ func (c *Child) Close() error {
 	if c.command.Process == nil {
 		return nil
 	}
-	return c.command.Process.Signal(os.Interrupt)
+	return terminateProcess(c.command.Process)
 }
 
 func (c *Child) readLoop(stdout io.Reader) {

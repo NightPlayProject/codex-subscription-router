@@ -10,6 +10,8 @@
 - Processes running as the same macOS user are not considered isolated from
   one another; they can already read that user's app data subject to macOS
   permissions.
+- On Windows, the official Microsoft Store package is read-only build input.
+  The router modifies only the per-user staged copy under `%LOCALAPPDATA%`.
 
 ## Credentials
 
@@ -49,6 +51,12 @@ application-group and keychain entitlements are removed from modified callers.
 The native helper's caller allowlist is patched to the selected team and the
 independent desktop bundle ID. This is required for the helper's peer checks;
 it does not bypass macOS Accessibility or Screen Recording consent.
+
+On Windows, no Store package files, package identity, or native Computer Use
+runtime binaries are modified in place. The staged Electron ASAR and staged
+`resources\codex.exe` are the only application payloads replaced by the Windows
+patch path. Windows Computer Use remains an upstream native integration and must
+be validated separately on each supported official build.
 
 ## Diagnostics
 

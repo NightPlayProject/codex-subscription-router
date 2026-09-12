@@ -2,7 +2,9 @@
 
 ![Multi-subscription account menu](screenshots/account-menu.png)
 
-Use multiple ChatGPT subscriptions from one independent macOS desktop app.
+Use multiple ChatGPT subscriptions from one independent desktop app on macOS.
+Windows x64 now has a fail-closed staged port for one exact Microsoft Store
+Codex build; its desktop GUI and Computer Use path are still being validated.
 
 Codex Subscription Router creates a locally patched copy of the official
 ChatGPT app, balances new chats across connected subscriptions, and keeps every
@@ -37,6 +39,9 @@ binaries or a prebuilt application.
   for the selected subscription.
 - **Working macOS integrations.** The copied Appshots and Computer Use helper is
   independently identified and signed so it can receive its own privacy grants.
+- **Fail-closed Windows staging.** The Windows installer copies the supported
+  Microsoft Store Codex package into a writable per-user location, verifies the
+  exact package version and ASAR hash, and never patches `WindowsApps` in place.
 
 ## How it works
 
@@ -68,15 +73,14 @@ Read [the architecture](docs/ARCHITECTURE.md) for the request flow and
 
 ## Compatibility
 
-Codex Subscription Router currently targets:
+Codex Subscription Router currently targets these exact upstream builds:
 
-| Component | Supported value |
-| --- | --- |
-| Platform | macOS on Apple silicon |
-| Official ChatGPT version | `26.803.61601` |
-| Official bundle build | `6396` |
-| Go | 1.26 or newer |
-| Node.js | 22.12 or newer |
+| Platform | Official app | Architecture | Verification |
+| --- | --- | --- | --- |
+| macOS | ChatGPT `26.803.61601` (build `6396`) | Apple silicon (`arm64`) | Exact version/build/ASAR/native anchors |
+| Windows | `OpenAI.Codex` `26.908.4834.0` | x64 | Exact AppX identity/version and `app.asar` SHA-256 |
+
+Go 1.26+ and Node.js 22.12+ are used for local builds on both platforms.
 
 The patcher verifies the official version, build, ASAR hash, renderer anchors,
 and native binary constants before changing anything. An unknown upstream build
@@ -84,6 +88,8 @@ is rejected by default rather than being partially patched. See
 [Compatibility](docs/COMPATIBILITY.md) for the recorded hash and test details.
 
 ## Requirements
+
+### macOS
 
 - The official ChatGPT app installed at `/Applications/ChatGPT.app`
 - Xcode Command Line Tools
@@ -94,13 +100,34 @@ is rejected by default rather than being partially patched. See
 A team-backed signing identity is required for reliable Appshots and Computer
 Use permissions. Ad-hoc signing is intended only for diagnostics.
 
+### Windows
+
+- Windows 11 x64 with the official Microsoft Store `OpenAI.Codex` package
+  version `26.908.4834.0`
+- Go 1.26+
+- Node.js 22.12+ and npm
+- Python 3
+- Windows PowerShell 5.1 or newer
+
+The Windows installer refuses any other package version or ASAR hash. It reads
+the official Store package only as source input and builds a separate copy under
+`%LOCALAPPDATA%\Programs\Codex Subscription Router`.
+
+On the current test machine, the staged GUI exits immediately while the
+official Store app is already running. Source/build checks, ASAR staging,
+`codex.exe` passthrough, and the authenticated mux control API have been
+validated independently. Full Windows GUI and Computer Use validation therefore
+requires closing the official app manually before launching the staged copy.
+
 ## Install
+
+### macOS
 
 Run one command. It downloads or updates the source, installs the locked build
 dependency, creates the independently signed app, and launches it:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/b-nnett/codex-subscription-router/main/install.sh | /bin/bash
+curl -fsSL https://raw.githubusercontent.com/NightPlayProject/codex-subscription-router/main/install.sh | /bin/bash
 ```
 
 The installer keeps its source checkout in
@@ -116,12 +143,12 @@ compatibility check fails.
 
 ### Install via prompt
 
-> Install Codex Subscription Router from `https://github.com/b-nnett/codex-subscription-router` on this Mac using the repository's supported one-command installer, without modifying the official ChatGPT app or deleting any existing router state. Verify the resulting app and Computer Use helper signatures, launch the app, and ask me only if a prerequisite or macOS permission requires interaction.
+> Install Codex Subscription Router from `https://github.com/NightPlayProject/codex-subscription-router` on this Mac using the repository's supported one-command installer, without modifying the official ChatGPT app or deleting any existing router state. Verify the resulting app and Computer Use helper signatures, launch the app, and ask me only if a prerequisite or macOS permission requires interaction.
 
 ### Install from a clone
 
 ```sh
-git clone https://github.com/b-nnett/codex-subscription-router.git
+git clone https://github.com/NightPlayProject/codex-subscription-router.git
 cd codex-subscription-router
 npm ci --ignore-scripts
 python3 scripts/patch_app.py
@@ -155,6 +182,35 @@ python3 scripts/patch_app.py --allow-adhoc-signing
 ```
 
 Appshots and Computer Use may not function with an ad-hoc signature.
+
+### Windows
+
+Clone the source, install the locked ASAR build dependency, and stage the
+supported Microsoft Store build:
+
+```powershell
+git clone https://github.com/NightPlayProject/codex-subscription-router.git
+cd codex-subscription-router
+npm ci --ignore-scripts
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+The installer creates a writable copy at
+`%LOCALAPPDATA%\Programs\Codex Subscription Router`, replaces only that copy's
+bundled `codex.exe` with the router, and keeps the original CLI beside it as
+`codex.real.exe`. It does not stop, restart, or modify the official Store app and
+does not launch the staged copy automatically.
+
+Launch the independent copy when ready:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Codex Subscription Router\Launch-CodexSubscriptionRouter.ps1"
+```
+
+The launcher uses an isolated Electron profile under
+`%LOCALAPPDATA%\Codex Subscription Router\User Data`. To rebuild an existing
+staged copy after source changes, run `install.ps1 -Force`; the previous staged
+copy is moved to a timestamped backup under `~\.codex-mux\backups\windows`.
 
 ## Grant macOS permissions
 
@@ -218,6 +274,8 @@ the reset is consumed only for that account.
 
 ## Update or rebuild
 
+### macOS
+
 The copied app's updater is disabled so an official update cannot overwrite the
 patch. Update `/Applications/ChatGPT.app`, verify that the new build is listed
 as compatible, then rebuild:
@@ -234,6 +292,22 @@ intact. Delete old backups manually after the rebuilt app passes the smoke test.
 Build separately for each macOS user. Generated bundles contain user-specific
 helper and socket paths and are not relocatable or intended for redistribution.
 
+### Windows
+
+Update the official Microsoft Store app normally, then check
+`docs/COMPATIBILITY.md` before rebuilding. The Windows patcher intentionally
+rejects unknown official versions and hashes until their bundle anchors have
+been reviewed.
+
+For the currently supported build:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Force
+```
+
+Close only the staged Codex Subscription Router copy before replacing it. The
+official Store app does not need to be closed.
+
 ## Local data and security
 
 | Path | Purpose |
@@ -244,6 +318,8 @@ helper and socket paths and are not relocatable or intended for redistribution.
 | `~/.codex-mux/control-token` | Token for the loopback-only control service |
 | `~/.codex-mux/backups` | Recoverable app and helper backups |
 | `~/Library/Application Support/Codex Subscription Router` | Independent desktop profile |
+| `%LOCALAPPDATA%\Codex Subscription Router\User Data` | Independent Windows desktop profile |
+| `%LOCALAPPDATA%\Programs\Codex Subscription Router` | Staged Windows application copy |
 
 The control service binds only to `127.0.0.1` and protects private routes with a
 random 256-bit token. OAuth tokens stay inside their account's Codex home and
@@ -264,6 +340,12 @@ npm run check
 npm run release:check
 ```
 
+On Windows, run the platform-specific checks as well:
+
+```powershell
+npm run check:windows
+```
+
 The Go backend and injected renderer have no runtime third-party dependencies.
 `@electron/asar` is build-only. Deterministic UI preview routes are enabled only
 when `CODEX_MUX_UI_TESTS=1` is present at launch and remain token-authenticated.
@@ -279,6 +361,8 @@ latest completed run is recorded in
 - Combined “skills explored” totals can count the same skill once per account
   because the upstream profile response exposes counts rather than skill IDs.
 - Generated app bundles are tied to one macOS user and signing team.
+- Windows support is locked to the exact Microsoft Store package and ASAR hash
+  recorded in `docs/COMPATIBILITY.md`; a new official build requires review.
 - Releases are source-only; patched OpenAI binaries are never distributed.
 
 ## Contributing and releases

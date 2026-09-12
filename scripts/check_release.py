@@ -21,6 +21,7 @@ REQUIRED_FILES = (
     "README.md",
     "SECURITY.md",
     "VERSION",
+    "install.ps1",
     "install.sh",
     "docs/ARCHITECTURE.md",
     "docs/COMPATIBILITY.md",
@@ -30,6 +31,10 @@ REQUIRED_FILES = (
     "docs/SMOKE-TEST.md",
     "package-lock.json",
     "package.json",
+    "scripts/check_windows.ps1",
+    "scripts/patch_app_windows.py",
+    "tests/test_patch_app_windows.py",
+    "ui/windows-account-panel.js",
 )
 CURATED_SCREENSHOTS = (
     "screenshots/account-menu.png",
@@ -53,13 +58,24 @@ FORBIDDEN_TRACKED_SUFFIXES = {
     ".zip",
 }
 FORBIDDEN_TRACKED_NAMES = {".env", "auth.json", "control-token", "state.json"}
-TEXT_SUFFIXES = {"", ".c", ".go", ".json", ".js", ".cjs", ".md", ".py", ".toml", ".yml", ".yaml"}
+TEXT_SUFFIXES = {"", ".c", ".go", ".json", ".js", ".cjs", ".md", ".ps1", ".py", ".toml", ".yml", ".yaml"}
 MACOS_USER_PREFIX = "/" + "Users" + "/"
 
 
 def fail(message: str) -> None:
     print(f"release check: {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def git_index_mode(relative: str) -> str:
+    output = subprocess.check_output(
+        ["git", "ls-files", "-s", "--", relative],
+        cwd=ROOT,
+        text=True,
+    ).strip()
+    if not output:
+        fail(f"required file is not tracked: {relative}")
+    return output.split(maxsplit=1)[0]
 
 
 def main() -> int:
@@ -86,8 +102,8 @@ def main() -> int:
         fail("package-lock.json does not match the declared @electron/asar version")
     if package.get("license") != "MIT":
         fail("package.json license does not match LICENSE")
-    if not ((ROOT / "install.sh").stat().st_mode & 0o111):
-        fail("install.sh is not executable")
+    if git_index_mode("install.sh") != "100755":
+        fail("install.sh is not executable in the Git index")
 
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     dated_heading = rf"^## \[{re.escape(version)}\] - \d{{4}}-\d{{2}}-\d{{2}}$"
