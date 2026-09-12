@@ -195,6 +195,16 @@ npm ci --ignore-scripts
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
+The repository's default `main` branch contains the supported Windows installer,
+so a normal GitHub clone is sufficient. If an earlier failed attempt left an
+empty or incomplete staging folder, `install.ps1` moves that partial copy to a
+timestamped recovery backup and continues automatically. If a complete staged
+router is already installed, rerun with `-Force` to replace it safely:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Force
+```
+
 The installer creates a writable copy at
 `%LOCALAPPDATA%\Programs\Codex Subscription Router`, replaces only that copy's
 bundled `codex.exe` with the router, and keeps the original CLI beside it as

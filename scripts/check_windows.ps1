@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+  [string]$GoExe = ''
+)
 
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path $PSScriptRoot -Parent
@@ -15,9 +17,27 @@ function Invoke-Checked {
   }
 }
 
+function Resolve-GoExecutable {
+  if ($GoExe) {
+    $candidate = [System.IO.Path]::GetFullPath($GoExe)
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+      throw "Go executable not found: $candidate"
+    }
+    return $candidate
+  }
+
+  $command = Get-Command go.exe -ErrorAction SilentlyContinue
+  if ($command) { return $command.Source }
+
+  $portable = Join-Path $env:TEMP 'codex-router-go126\go\bin\go.exe'
+  if (Test-Path -LiteralPath $portable -PathType Leaf) { return $portable }
+
+  throw 'Go 1.26+ is required. Pass -GoExe with the path to go.exe.'
+}
+
 Push-Location $ProjectRoot
 try {
-  $go = (Get-Command go.exe -ErrorAction Stop).Source
+  $go = Resolve-GoExecutable
   $node = (Get-Command node.exe -ErrorAction Stop).Source
   $python = (Get-Command python.exe -ErrorAction Stop).Source
 

@@ -33,6 +33,22 @@ function Resolve-GoExecutable {
   throw 'Go 1.26+ is required. Pass -GoExe with the path to go.exe.'
 }
 
+function Move-StagedDestinationToBackup {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [string]$Reason = ''
+  )
+
+  $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $backupRoot = Join-Path $HOME ".codex-mux\backups\windows\$stamp"
+  New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
+  $backup = Join-Path $backupRoot 'Codex Subscription Router'
+  Move-Item -LiteralPath $Path -Destination $backup
+  if ($Reason) { Write-Host $Reason }
+  Write-Host "Existing staged copy moved to $backup"
+}
+
 $package = Get-OfficialCodexPackage
 $source = [System.IO.Path]::GetFullPath($package.InstallLocation)
 $sourceAsar = Join-Path $source 'app\resources\app.asar'
@@ -42,13 +58,23 @@ if ($sourceHash -ne $ExpectedAsarSha256) { throw "Unsupported official app.asar 
 if ($source.TrimEnd('\') -ieq $Destination.TrimEnd('\')) { throw 'Source and destination must be different.' }
 
 if (Test-Path -LiteralPath $Destination) {
-  if (-not $Force) { throw "Destination already exists: $Destination. Re-run with -Force to create a recoverable backup." }
-  $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-  $backupRoot = Join-Path $HOME ".codex-mux\backups\windows\$stamp"
-  New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
-  $backup = Join-Path $backupRoot 'Codex Subscription Router'
-  Move-Item -LiteralPath $Destination -Destination $backup
-  Write-Host "Existing staged copy moved to $backup"
+  $existingLauncher = Join-Path $Destination 'Launch-CodexSubscriptionRouter.ps1'
+  $existingRealCli = Join-Path $Destination 'app\resources\codex.real.exe'
+  $existingAsar = Join-Path $Destination 'app\resources\app.asar'
+  $looksComplete =
+    (Test-Path -LiteralPath $existingLauncher -PathType Leaf) -and
+    (Test-Path -LiteralPath $existingRealCli -PathType Leaf) -and
+    (Test-Path -LiteralPath $existingAsar -PathType Leaf)
+
+  if ($looksComplete -and -not $Force) {
+    throw "A complete staged router already exists at $Destination. Re-run with -Force to replace it and create a recoverable backup."
+  }
+
+  if ($looksComplete) {
+    Move-StagedDestinationToBackup -Path $Destination
+  } else {
+    Move-StagedDestinationToBackup -Path $Destination -Reason 'Incomplete staged router detected; recovering automatically.'
+  }
 }
 
 New-Item -ItemType Directory -Path $Destination -Force | Out-Null
@@ -78,11 +104,23 @@ if (-not $python) { throw 'Python 3 is required to patch the staged ASAR.' }
 & $python.Source (Join-Path $ProjectRoot 'scripts\patch_app_windows.py') --source $source --destination $Destination --mux-exe $muxExe
 if ($LASTEXITCODE -ne 0) { throw "Windows patcher failed with exit code $LASTEXITCODE" }
 
+$launcher = Join-Path $Destination 'Launch-CodexSubscriptionRouter.ps1'
+$installedMux = Join-Path $Destination 'app\resources\codex.exe'
+$installedRealCli = Join-Path $Destination 'app\resources\codex.real.exe'
+foreach ($required in @($launcher, $installedMux, $installedRealCli)) {
+  if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+    throw "Windows staging finished without required file: $required"
+  }
+}
+if ((Get-FileHash -LiteralPath $installedMux -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $muxExe -Algorithm SHA256).Hash) {
+  throw 'Installed router executable does not match the freshly built multiplexer.'
+}
+
 $officialAfter = (Get-FileHash -LiteralPath $sourceAsar -Algorithm SHA256).Hash
 if ($officialAfter -ne $ExpectedAsarSha256) { throw 'Official app.asar changed unexpectedly during installation.' }
 
 Write-Host ''
 Write-Host "Staged Windows build: $Destination"
-Write-Host "Launcher: $(Join-Path $Destination 'Launch-CodexSubscriptionRouter.ps1')"
+Write-Host "Launcher: $launcher"
 Write-Host 'The official ChatGPT/Codex installation was not modified or restarted.'
 Write-Host 'This installer does not launch the staged copy automatically.'
