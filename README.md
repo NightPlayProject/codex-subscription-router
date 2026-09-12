@@ -185,24 +185,23 @@ Appshots and Computer Use may not function with an ad-hoc signature.
 
 ### Windows
 
-Clone the source, install the locked ASAR build dependency, and stage the
-supported Microsoft Store build:
+For the fastest install, run this once in PowerShell:
 
 ```powershell
-git clone https://github.com/NightPlayProject/codex-subscription-router.git
-cd codex-subscription-router
-npm ci --ignore-scripts
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+irm https://raw.githubusercontent.com/NightPlayProject/codex-subscription-router/main/install-windows.ps1 | iex
 ```
 
-The repository's default `main` branch contains the supported Windows installer,
-so a normal GitHub clone is sufficient. If an earlier failed attempt left an
-empty or incomplete staging folder, `install.ps1` moves that partial copy to a
-timestamped recovery backup and continues automatically. If a complete staged
-router is already installed, rerun with `-Force` to replace it safely:
+Run the same command again whenever you want to upgrade. The bootstrap keeps a
+managed source checkout under `%LOCALAPPDATA%\Codex Subscription Router\Source`,
+fast-forwards it to the latest `main`, prepares the locked npm dependency, and
+runs the Windows installer. Existing staged installs and incomplete staging
+folders are moved to timestamped recovery backups automatically.
+
+If you already cloned the repository, the local installer is also a single
+command; `npm ci` is handled for you:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Force
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 The installer creates a writable copy at
@@ -220,9 +219,11 @@ Launch the independent copy when ready:
 The launcher uses an isolated Electron profile under
 `%LOCALAPPDATA%\Codex Subscription Router\User Data`. The Windows bootstrap also
 falls back to that same path if Electron drops the launcher environment variable
-during an internal relaunch. To rebuild an existing staged copy after source
-changes, run `install.ps1 -Force`; the previous staged copy is moved to a
-timestamped backup under `~\.codex-mux\backups\windows`.
+during an internal relaunch. Before replacing an existing staged copy, close only
+Codex Subscription Router if it is running; the installer will tell you and stop
+safely if it is still open. The previous staged copy is moved to a timestamped
+backup under `~\.codex-mux\backups\windows`. `-Force` remains accepted for
+compatibility with older commands but is no longer required.
 
 ## Grant macOS permissions
 
@@ -318,11 +319,12 @@ been reviewed.
 For the currently supported build:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Force
+irm https://raw.githubusercontent.com/NightPlayProject/codex-subscription-router/main/install-windows.ps1 | iex
 ```
 
-Close only the staged Codex Subscription Router copy before replacing it. The
-official Store app does not need to be closed.
+You can also rerun `install.ps1` from an existing clone. Close only the staged
+Codex Subscription Router copy before replacing it. The official Store app does
+not need to be closed or restarted.
 
 ## Local data and security
 

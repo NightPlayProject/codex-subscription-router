@@ -22,6 +22,7 @@ REQUIRED_FILES = (
     "SECURITY.md",
     "VERSION",
     "install.ps1",
+    "install-windows.ps1",
     "install.sh",
     "docs/ARCHITECTURE.md",
     "docs/COMPATIBILITY.md",

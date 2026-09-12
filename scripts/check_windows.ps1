@@ -47,16 +47,18 @@ try {
   Invoke-Checked $python -m py_compile scripts/patch_app_windows.py tests/test_patch_app_windows.py
   Invoke-Checked $python -m unittest tests/test_patch_app_windows.py
 
-  $tokens = $null
-  $errors = $null
-  [System.Management.Automation.Language.Parser]::ParseFile(
-    (Join-Path $ProjectRoot 'install.ps1'),
-    [ref]$tokens,
-    [ref]$errors
-  ) | Out-Null
-  if ($errors.Count -ne 0) {
-    $messages = $errors | ForEach-Object { $_.Message }
-    throw "install.ps1 parse errors: $($messages -join '; ')"
+  foreach ($scriptName in @('install.ps1', 'install-windows.ps1')) {
+    $tokens = $null
+    $errors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile(
+      (Join-Path $ProjectRoot $scriptName),
+      [ref]$tokens,
+      [ref]$errors
+    ) | Out-Null
+    if ($errors.Count -ne 0) {
+      $messages = $errors | ForEach-Object { $_.Message }
+      throw "$scriptName parse errors: $($messages -join '; ')"
+    }
   }
 } finally {
   Pop-Location

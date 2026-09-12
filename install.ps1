@@ -11,6 +11,17 @@ $ExpectedAsarSha256 = '2BD5B96A48232F3CCF3DF6BE50965920699EA3A1B4512DCDD770E209F
 $ProjectRoot = $PSScriptRoot
 $Destination = [System.IO.Path]::GetFullPath($Destination)
 
+function Invoke-Checked {
+  param(
+    [Parameter(Mandatory = $true)][string]$FilePath,
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments
+  )
+  & $FilePath @Arguments
+  if ($LASTEXITCODE -ne 0) {
+    throw "$FilePath failed with exit code $LASTEXITCODE"
+  }
+}
+
 function Get-OfficialCodexPackage {
   $package = Get-AppxPackage -Name 'OpenAI.Codex' | Sort-Object Version -Descending | Select-Object -First 1
   if (-not $package) { throw 'OpenAI.Codex is not installed for this Windows user.' }
@@ -49,6 +60,22 @@ function Move-StagedDestinationToBackup {
   Write-Host "Existing staged copy moved to $backup"
 }
 
+function Assert-StagedRouterIsClosed {
+  if (-not (Test-Path -LiteralPath $Destination)) { return }
+  $prefix = $Destination.TrimEnd('\') + '\'
+  $launcherPath = Join-Path $Destination 'Launch-CodexSubscriptionRouter.ps1'
+  $running = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    ($_.ProcessId -ne $PID) -and (
+      ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) -or
+      ($_.CommandLine -and $_.CommandLine.IndexOf($launcherPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)
+    )
+  }
+  if ($running) {
+    $summary = ($running | ForEach-Object { "$($_.Name) (PID $($_.ProcessId))" }) -join ', '
+    throw "Codex Subscription Router is still running: $summary. Close only the staged router, then rerun the same install command."
+  }
+}
+
 $package = Get-OfficialCodexPackage
 $source = [System.IO.Path]::GetFullPath($package.InstallLocation)
 $sourceAsar = Join-Path $source 'app\resources\app.asar'
@@ -56,6 +83,33 @@ if (-not (Test-Path -LiteralPath $sourceAsar -PathType Leaf)) { throw "Official 
 $sourceHash = (Get-FileHash -LiteralPath $sourceAsar -Algorithm SHA256).Hash
 if ($sourceHash -ne $ExpectedAsarSha256) { throw "Unsupported official app.asar hash $sourceHash; expected $ExpectedAsarSha256." }
 if ($source.TrimEnd('\') -ieq $Destination.TrimEnd('\')) { throw 'Source and destination must be different.' }
+
+Assert-StagedRouterIsClosed
+
+$go = Resolve-GoExecutable
+$npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+if (-not $npm) { throw 'Node.js 22.12+ and npm are required.' }
+$python = Get-Command python.exe -ErrorAction SilentlyContinue
+if (-not $python) { throw 'Python 3 is required to patch the staged ASAR.' }
+
+Push-Location $ProjectRoot
+try {
+  Write-Host 'Preparing locked build tools...'
+  Invoke-Checked $npm.Source ci --ignore-scripts --no-audit --no-fund
+} finally {
+  Pop-Location
+}
+
+$buildDir = Join-Path $ProjectRoot 'build\windows'
+New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
+$muxExe = Join-Path $buildDir 'codex-mux.exe'
+Push-Location $ProjectRoot
+try {
+  & $go build -trimpath '-ldflags=-s -w' -o $muxExe .\cmd\codex-mux
+  if ($LASTEXITCODE -ne 0) { throw "go build failed with exit code $LASTEXITCODE" }
+} finally {
+  Pop-Location
+}
 
 if (Test-Path -LiteralPath $Destination) {
   $existingLauncher = Join-Path $Destination 'Launch-CodexSubscriptionRouter.ps1'
@@ -65,16 +119,8 @@ if (Test-Path -LiteralPath $Destination) {
     (Test-Path -LiteralPath $existingLauncher -PathType Leaf) -and
     (Test-Path -LiteralPath $existingRealCli -PathType Leaf) -and
     (Test-Path -LiteralPath $existingAsar -PathType Leaf)
-
-  if ($looksComplete -and -not $Force) {
-    throw "A complete staged router already exists at $Destination. Re-run with -Force to replace it and create a recoverable backup."
-  }
-
-  if ($looksComplete) {
-    Move-StagedDestinationToBackup -Path $Destination
-  } else {
-    Move-StagedDestinationToBackup -Path $Destination -Reason 'Incomplete staged router detected; recovering automatically.'
-  }
+  $reason = if ($looksComplete) { 'Existing staged router detected; creating a recoverable backup before upgrading.' } else { 'Incomplete staged router detected; recovering automatically.' }
+  Move-StagedDestinationToBackup -Path $Destination -Reason $reason
 }
 
 New-Item -ItemType Directory -Path $Destination -Force | Out-Null
@@ -87,20 +133,6 @@ if ((Get-FileHash -LiteralPath $stagedAsar -Algorithm SHA256).Hash -ne $Expected
   throw 'Staged app.asar does not byte-match the official package after copying.'
 }
 
-$go = Resolve-GoExecutable
-$buildDir = Join-Path $ProjectRoot 'build\windows'
-New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
-$muxExe = Join-Path $buildDir 'codex-mux.exe'
-Push-Location $ProjectRoot
-try {
-  & $go build -trimpath '-ldflags=-s -w' -o $muxExe .\cmd\codex-mux
-  if ($LASTEXITCODE -ne 0) { throw "go build failed with exit code $LASTEXITCODE" }
-} finally {
-  Pop-Location
-}
-
-$python = Get-Command python.exe -ErrorAction SilentlyContinue
-if (-not $python) { throw 'Python 3 is required to patch the staged ASAR.' }
 & $python.Source (Join-Path $ProjectRoot 'scripts\patch_app_windows.py') --source $source --destination $Destination --mux-exe $muxExe
 if ($LASTEXITCODE -ne 0) { throw "Windows patcher failed with exit code $LASTEXITCODE" }
 
@@ -124,3 +156,4 @@ Write-Host "Staged Windows build: $Destination"
 Write-Host "Launcher: $launcher"
 Write-Host 'The official ChatGPT/Codex installation was not modified or restarted.'
 Write-Host 'This installer does not launch the staged copy automatically.'
+if ($Force) { Write-Verbose '-Force is no longer required; it remains accepted for compatibility with older commands.' }
