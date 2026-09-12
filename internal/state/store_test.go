@@ -7,6 +7,46 @@ import (
 	"testing"
 )
 
+func TestRemoveAccountProtectsHistoryAndPrimary(t *testing.T) {
+	root := t.TempDir()
+	store, err := Open(filepath.Join(root, "mux"), filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, err := store.AddAccount("Work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RemoveAccount("primary"); err == nil {
+		t.Fatal("removed primary")
+	}
+	if err := store.SetThreadOwner("chat", account.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RemoveAccount(account.ID); err == nil {
+		t.Fatal("removed owner of existing chat")
+	}
+	if err := store.SetThreadOwner("chat", "primary"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RemoveAccount(account.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(account.CodexHome); err != nil {
+		t.Fatal("removed saved files:", err)
+	}
+	reopened, err := Open(filepath.Join(root, "mux"), filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reopened.Account(account.ID); ok {
+		t.Fatal("removal was not persisted")
+	}
+	if owner, _ := reopened.ThreadOwner("chat"); owner != "primary" {
+		t.Fatal("changed chat ownership")
+	}
+}
+
 func TestStoreBootstrapsPrimaryAndPersistsThreadAffinity(t *testing.T) {
 	root := t.TempDir()
 	primaryHome := filepath.Join(root, "primary")

@@ -132,6 +132,38 @@ func (m *Multiplexer) SetPreferredNewThreadAccountID(accountID string) error {
 	return m.store.SetPreferredNewThreadAccountID(accountID)
 }
 
+func (m *Multiplexer) RefreshSubscription(ctx context.Context, accountID string) error {
+	if accountID == "" {
+		return nil
+	}
+	account, ok := m.store.Account(accountID)
+	if !ok || !account.Enabled {
+		return fmt.Errorf("subscription is unavailable or disabled")
+	}
+	child, ok := m.child(accountID)
+	if !ok {
+		return fmt.Errorf("subscription backend is unavailable")
+	}
+	return refreshSignedInSubscription(ctx, child)
+}
+
+func refreshSignedInSubscription(ctx context.Context, child appServerRequester) error {
+	response, err := child.Request(ctx, "account/read", json.RawMessage(`{"refreshToken":true}`))
+	if err != nil {
+		return fmt.Errorf("refresh subscription: %w", err)
+	}
+	var result struct {
+		Account json.RawMessage `json:"account"`
+	}
+	if err := json.Unmarshal(response.Result, &result); err != nil {
+		return fmt.Errorf("decode refreshed subscription: %w", err)
+	}
+	if len(result.Account) == 0 || string(result.Account) == "null" {
+		return fmt.Errorf("this subscription is signed out; sign in to use it")
+	}
+	return nil
+}
+
 func (m *Multiplexer) StartLogin(ctx context.Context, id, mode string) (json.RawMessage, error) {
 	if mode != "chatgpt" && mode != "chatgptDeviceCode" {
 		return nil, errors.New("login mode must be chatgpt or chatgptDeviceCode")
@@ -146,6 +178,27 @@ func (m *Multiplexer) StartLogin(ctx context.Context, id, mode string) (json.Raw
 		return nil, err
 	}
 	return response.Result, nil
+}
+
+func (m *Multiplexer) RemoveAccount(ctx context.Context, id string) error {
+	snapshot, err := m.accountSnapshotWithProfile(ctx, id, false)
+	if err != nil {
+		return err
+	}
+	if snapshot.Connected {
+		return fmt.Errorf("sign out before removing this subscription")
+	}
+	if err := m.store.RemoveAccount(id); err != nil {
+		return err
+	}
+	m.childrenMu.Lock()
+	child := m.children[id]
+	delete(m.children, id)
+	m.childrenMu.Unlock()
+	if child != nil {
+		_ = child.Close()
+	}
+	return nil
 }
 
 func (m *Multiplexer) Logout(ctx context.Context, id string) error {

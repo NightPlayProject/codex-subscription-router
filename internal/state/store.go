@@ -269,6 +269,38 @@ func (s *Store) SetThreadOwner(threadID, accountID string) error {
 	return s.saveLocked()
 }
 
+// RemoveAccount removes routing metadata only; retained history is never deleted.
+func (s *Store) RemoveAccount(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index, account := range s.accounts {
+		if account.ID != id {
+			continue
+		}
+		if account.Controller {
+			return errors.New("the primary subscription cannot be removed")
+		}
+		for _, owner := range s.owners {
+			if owner == id {
+				return errors.New("move this subscription's chats to another subscription before removing it")
+			}
+		}
+		previous := s.accounts
+		preferred := s.preferredNewThreadAccountID
+		s.accounts = append(append([]Account(nil), previous[:index]...), previous[index+1:]...)
+		if preferred == id {
+			s.preferredNewThreadAccountID = ""
+		}
+		if err := s.saveLocked(); err != nil {
+			s.accounts = previous
+			s.preferredNewThreadAccountID = preferred
+			return err
+		}
+		return nil
+	}
+	return errors.New("subscription not found")
+}
+
 func (s *Store) ThreadCounts() map[string]int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

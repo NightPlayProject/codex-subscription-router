@@ -75,6 +75,18 @@
       .cmx-btn{border:1px solid rgba(255,255,255,.16);background:#303030;color:#fff;border-radius:9px;padding:6px 8px;cursor:pointer}.cmx-btn:hover{background:#3a3a3a}.cmx-primary{background:#fff;color:#111;border-color:#fff}.cmx-primary:hover{background:#e9e9e9}.cmx-btn:disabled{opacity:.55;cursor:default}
       .cmx-login{margin-top:10px;padding:10px;border-radius:10px;background:#2b2b2b}.cmx-code{font:600 20px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.06em;margin:6px 0}.cmx-select{width:100%;margin-top:8px;background:#2b2b2b;color:#fff;border:1px solid rgba(255,255,255,.16);border-radius:9px;padding:7px}
     `;
+    style.textContent += `
+      #${ROOT_ID} .cmx-panel{transform-origin:bottom right;transition:opacity .16s ease,transform .16s ease,visibility .16s;opacity:1;transform:translateY(0) scale(1);scrollbar-gutter:stable}
+      #${ROOT_ID} .cmx-panel.cmx-hidden{display:block;position:absolute;bottom:42px;right:0;opacity:0;visibility:hidden;pointer-events:none;transform:translateY(8px) scale(.98)}
+      #${ROOT_ID} .cmx-row{grid-template-columns:minmax(0,1fr);gap:8px}
+      #${ROOT_ID} .cmx-actions{justify-content:flex-start}
+      #${ROOT_ID} .cmx-usage-value{white-space:nowrap;flex-shrink:0}
+      #${ROOT_ID} .cmx-btn,#${ROOT_ID} .cmx-launch,#${ROOT_ID} .cmx-select{transition:background .14s ease,border-color .14s ease,transform .14s ease}
+      #${ROOT_ID} button:active:not(:disabled){transform:scale(.97)}
+      #${ROOT_ID} button:focus-visible,#${ROOT_ID} select:focus-visible{outline:2px solid #a7c7ff;outline-offset:3px}
+      #${ROOT_ID} .cmx-login button{margin:6px 6px 0 0}
+      @media(prefers-reduced-motion:reduce){#${ROOT_ID} .cmx-panel,#${ROOT_ID} button,#${ROOT_ID} .cmx-select{transition:none;transform:none}}
+    `;
     document.head.appendChild(style);
   }
 
@@ -101,6 +113,7 @@
     let accounts = [];
     let busy = false;
     let login = null;
+    let refreshing = false;
     let error = "";
 	let preferredNewThreadAccountId = "";
 
@@ -110,10 +123,11 @@
 		request("/routing-preference"),
 	  ]);
 	  accounts = result.accounts || [];
+	  if (login && (!accounts.some(a => a.id === login.accountId) || accounts.some(a => a.id === login.accountId && a.connected))) login = null;
 	  preferredNewThreadAccountId = routing.accountId || "";
       const current = globalThis.__codexMuxPluginAccountId;
-      if (!current || !accounts.some((account) => account.id === current && account.enabled)) {
-        globalThis.__codexMuxPluginAccountId = accounts.find((account) => account.enabled)?.id || null;
+      if (!current || !accounts.some((account) => account.id === current && account.enabled && account.connected)) {
+        globalThis.__codexMuxPluginAccountId = accounts.find(a => a.id === preferredNewThreadAccountId && a.enabled && a.connected)?.id || accounts.find((account) => account.enabled && account.connected)?.id || null;
       }
       render();
     }
@@ -125,8 +139,8 @@
 
     async function run(action) {
       if (busy) return;
-      setBusy(true);
       error = "";
+      setBusy(true);
       try {
         await action();
       } catch (caught) {
@@ -138,6 +152,7 @@
     }
 
     function render() {
+      const scrollTop = panel.scrollTop;
       panel.replaceChildren();
       const head = document.createElement("div");
       head.className = "cmx-head";
@@ -149,6 +164,7 @@
       status.className = "cmx-muted";
       const connected = accounts.filter((account) => account.connected && account.enabled).length;
       status.textContent = `${connected} connected · ${accounts.length} total`;
+      if (busy) status.textContent = "Updating subscriptions…";
       titleWrap.append(title, status);
       const refreshButton = createButton("Refresh");
       refreshButton.disabled = busy;
@@ -245,6 +261,22 @@
           }));
           actions.appendChild(logout);
         }
+        if (!account.connected && !account.controller) {
+          const signIn = createButton("Sign in");
+          signIn.disabled = busy;
+          signIn.addEventListener("click", () => run(async () => {
+            const result = await request(`/accounts/${encodeURIComponent(account.id)}/login`, { method: "POST", body: JSON.stringify({ mode: "chatgptDeviceCode" }) });
+            login = result.login ? { ...result.login, accountId: account.id } : null;
+          }));
+          const remove = createButton("Remove");
+          remove.disabled = busy || account.threadCount > 0;
+          remove.title = account.threadCount > 0 ? "Move this subscription’s chats to another subscription before removing it." : "Remove this signed-out subscription from the list. Saved files are kept.";
+          remove.addEventListener("click", () => run(async () => {
+            await request(`/accounts/${encodeURIComponent(account.id)}/remove`, { method: "POST", body: "{}" });
+            await refresh();
+          }));
+          actions.append(signIn, remove);
+        }
         row.append(details, actions);
         panel.appendChild(row);
       }
@@ -252,15 +284,17 @@
 	  const routingLabel = document.createElement("div");
 	  routingLabel.className = "cmx-muted";
 	  routingLabel.style.marginTop = "10px";
-	  routingLabel.textContent = "Codex chats use";
+	  routingLabel.textContent = "Chat subscription";
 	  const routingSelect = document.createElement("select");
 	  routingSelect.className = "cmx-select";
+	  routingSelect.disabled = busy;
+	  routingSelect.setAttribute("aria-label", "Chat subscription");
 	  const automatic = document.createElement("option");
 	  automatic.value = "";
 	  automatic.textContent = "Automatic";
 	  automatic.selected = preferredNewThreadAccountId === "";
 	  routingSelect.appendChild(automatic);
-	  for (const account of accounts.filter((item) => item.enabled)) {
+	  for (const account of accounts.filter((item) => item.enabled && item.connected)) {
 		const option = document.createElement("option");
 		option.value = account.id;
 		option.textContent = account.label || account.id;
@@ -273,8 +307,14 @@
 		  body: JSON.stringify({ accountId: routingSelect.value || "" }),
 		});
 		preferredNewThreadAccountId = updated.accountId || "";
+		globalThis.__codexMuxPluginAccountId = preferredNewThreadAccountId || accounts.find(a => a.controller && a.connected)?.id || null;
 	  }));
 	  panel.append(routingLabel, routingSelect);
+	  const routingHelp = document.createElement("div");
+	  routingHelp.className = "cmx-muted";
+	  routingHelp.style.marginTop = "6px";
+	  routingHelp.textContent = "Applies to new chats and the next message in existing chats. Also selects the subscription for plugins and MCP.";
+	  panel.appendChild(routingHelp);
 
       const pluginLabel = document.createElement("div");
       pluginLabel.className = "cmx-muted";
@@ -282,7 +322,9 @@
       pluginLabel.textContent = "Plugins / MCP subscription";
       const pluginSelect = document.createElement("select");
       pluginSelect.className = "cmx-select";
-      for (const account of accounts.filter((item) => item.enabled)) {
+      pluginSelect.disabled = busy;
+      pluginSelect.setAttribute("aria-label", "Plugins and MCP subscription");
+      for (const account of accounts.filter((item) => item.enabled && item.connected)) {
         const option = document.createElement("option");
         option.value = account.id;
         option.textContent = account.label || account.id;
@@ -309,7 +351,7 @@
         const loginBox = document.createElement("div");
         loginBox.className = "cmx-login";
         const prompt = document.createElement("div");
-        prompt.textContent = "Complete sign-in with this device code:";
+        prompt.textContent = "Finish signing in with this code. This card closes automatically when connected.";
         const code = document.createElement("div");
         code.className = "cmx-code";
         code.textContent = login.userCode || "(code unavailable)";
@@ -328,15 +370,29 @@
             render();
           }
         });
-        loginBox.append(prompt, code, open);
+        const dismiss = createButton("Hide code");
+        dismiss.addEventListener("click", () => { login = null; render(); });
+        loginBox.append(prompt, code, open, dismiss);
         panel.appendChild(loginBox);
       }
+      panel.scrollTop = scrollTop;
     }
 
     launch.addEventListener("click", () => {
       panel.classList.toggle("cmx-hidden");
+      launch.setAttribute("aria-expanded", String(!panel.classList.contains("cmx-hidden")));
       if (!panel.classList.contains("cmx-hidden")) run(refresh);
     });
+    launch.setAttribute("aria-expanded", "false");
+    root.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { panel.classList.add("cmx-hidden"); launch.setAttribute("aria-expanded", "false"); launch.focus(); }
+    });
+    setInterval(async () => {
+      if (!login || busy || refreshing) return;
+      refreshing = true;
+      try { await refresh(); } catch { /* Preserve the sign-in card during transient network failures. */ }
+      finally { refreshing = false; }
+    }, 3000);
 
     try {
       await refresh();

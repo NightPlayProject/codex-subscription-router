@@ -463,6 +463,9 @@ func (m *Multiplexer) resumeThreadOnAccount(ctx context.Context, threadID, sourc
 	if !ok {
 		return fmt.Errorf("target subscription is unavailable")
 	}
+	if err := refreshSignedInSubscription(ctx, target); err != nil {
+		return err
+	}
 	return resumeThreadBetweenAccounts(
 		ctx,
 		threadID,

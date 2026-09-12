@@ -44,6 +44,7 @@ try {
   Invoke-Checked $go test ./...
   Invoke-Checked $go vet ./...
   Invoke-Checked $node --check ui/windows-account-panel.js
+  Invoke-Checked $node --test tests/windows-account-panel.test.cjs
   Invoke-Checked $python -m py_compile scripts/patch_app_windows.py tests/test_patch_app_windows.py
   Invoke-Checked $python -m unittest tests/test_patch_app_windows.py
 

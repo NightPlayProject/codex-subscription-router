@@ -202,6 +202,12 @@ func (s *Server) routingPreference(response http.ResponseWriter, request *http.R
 			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
+		ctx, cancel := context.WithTimeout(request.Context(), 30*time.Second)
+		defer cancel()
+		if err := s.mux.RefreshSubscription(ctx, input.AccountID); err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
 		if err := s.mux.SetPreferredNewThreadAccountID(input.AccountID); err != nil {
 			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
@@ -293,6 +299,12 @@ func (s *Server) accountAction(response http.ResponseWriter, request *http.Reque
 			login = map[string]any{}
 		}
 		writeJSON(response, http.StatusOK, map[string]any{"login": login})
+	case "remove":
+		if err := s.mux.RemoveAccount(ctx, accountID); err != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(response, http.StatusOK, map[string]any{"ok": true})
 	case "logout":
 		if err := s.mux.Logout(ctx, accountID); err != nil {
 			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})

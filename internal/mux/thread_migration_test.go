@@ -30,6 +30,30 @@ func (f *fakeRequester) Request(_ context.Context, method string, params json.Ra
 	return f.request(method, params)
 }
 
+func TestRefreshSubscriptionUsesManagedRefreshAndRejectsSignedOut(t *testing.T) {
+	for _, account := range []string{`{"type":"chatgpt","email":"test@example.invalid"}`, `null`, ``} {
+		child := &fakeRequester{request: func(method string, params json.RawMessage) (protocol.Message, error) {
+			if method != "account/read" || string(params) != `{"refreshToken":true}` {
+				t.Fatalf("unexpected refresh request: %s %s", method, params)
+			}
+			if account == "" {
+				return protocol.Message{Result: json.RawMessage(`{}`)}, nil
+			}
+			return protocol.Message{Result: json.RawMessage(`{"account":` + account + `}`)}, nil
+		}}
+		err := refreshSignedInSubscription(context.Background(), child)
+		if (err == nil) != (account != "null" && account != "") {
+			t.Fatalf("unexpected refresh result for %q: %v", account, err)
+		}
+	}
+	child := &fakeRequester{request: func(string, json.RawMessage) (protocol.Message, error) {
+		return protocol.Message{}, errors.New("refresh failed")
+	}}
+	if err := refreshSignedInSubscription(context.Background(), child); err == nil {
+		t.Fatal("ignored refresh failure")
+	}
+}
+
 func TestWithImmediateThreadUnload(t *testing.T) {
 	input := []string{"-c", "features.code_mode_host=true", "app-server", "--analytics-default-enabled"}
 	want := []string{"-c", "features.code_mode_host=true", "-c", "thread_unload_delay_secs=0", "app-server", "--analytics-default-enabled"}
