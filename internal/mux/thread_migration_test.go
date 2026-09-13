@@ -368,3 +368,55 @@ func TestMoveThreadToAccountChangesOwnerOnlyAfterSuccessfulResume(t *testing.T) 
 		t.Fatalf("owner after successful resume = %q, want %q", owner, secondary.ID)
 	}
 }
+
+func TestColdChatMigrationRecoversSavedHistory(t *testing.T) {
+	sourceHome, targetHome := t.TempDir(), t.TempDir()
+	id := "cold-chat"
+	dir := filepath.Join(sourceHome, "sessions", "2026", "09", "12")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"rollout-01-cold-chat.jsonl", "rollout-02-cold-chat.jsonl"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(`{"type":"session_meta","payload":{"session_id":"cold-chat","cwd":"work","model_provider":"openai"}}`+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	source := &fakeRequester{request: func(method string, _ json.RawMessage) (protocol.Message, error) {
+		if method == "thread/read" {
+			return protocol.Message{}, errors.New("thread/read: thread not loaded: cold-chat")
+		}
+		return protocol.Message{Result: json.RawMessage(`{"data":[]}`)}, nil
+	}}
+	resumed := false
+	target := &fakeRequester{request: func(method string, params json.RawMessage) (protocol.Message, error) {
+		if method == "thread/loaded/list" {
+			return protocol.Message{Result: json.RawMessage(`{"data":[]}`)}, nil
+		}
+		if method != "thread/resume" {
+			t.Fatalf("unexpected request %s", method)
+		}
+		var p struct {
+			Path    string `json:"path"`
+			Exclude bool   `json:"excludeTurns"`
+		}
+		if err := json.Unmarshal(params, &p); err != nil {
+			t.Fatal(err)
+		}
+		if filepath.Base(p.Path) != "rollout-02-cold-chat.jsonl" || !p.Exclude {
+			t.Fatal("wrong current page or unnecessary history response")
+		}
+		for _, name := range []string{"rollout-01-cold-chat.jsonl", "rollout-02-cold-chat.jsonl"} {
+			if _, err := os.Stat(filepath.Join(targetHome, "sessions", "2026", "09", "12", name)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		resumed = true
+		return protocol.Message{Result: json.RawMessage(`{}`)}, nil
+	}}
+	if err := resumeThreadBetweenAccounts(context.Background(), id, sourceHome, targetHome, source, target); err != nil {
+		t.Fatal(err)
+	}
+	if !resumed {
+		t.Fatal("cold chat not resumed")
+	}
+}

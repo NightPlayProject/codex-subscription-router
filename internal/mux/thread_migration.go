@@ -40,9 +40,9 @@ func resumeThreadBetweenAccounts(
 ) error {
 	readParams, _ := json.Marshal(map[string]any{"threadId": threadID, "includeTurns": false})
 	readResponse, err := source.Request(ctx, "thread/read", readParams)
-	if err != nil {
-		return fmt.Errorf("read existing chat: %w", err)
-	}
+	var sourcePath string
+	var sourceCWD string
+	var sourceModelProvider string
 	var readResult struct {
 		Thread struct {
 			ID            string `json:"id"`
@@ -54,19 +54,37 @@ func resumeThreadBetweenAccounts(
 			} `json:"status"`
 		} `json:"thread"`
 	}
-	if err := json.Unmarshal(readResponse.Result, &readResult); err != nil {
-		return fmt.Errorf("decode existing chat: %w", err)
-	}
-	if readResult.Thread.ID != threadID || readResult.Thread.Path == "" {
-		return errors.New("existing chat has no resumable history path")
-	}
-	if readResult.Thread.Status.Type == "active" {
-		return errChatActive
+	if err == nil {
+		if err := json.Unmarshal(readResponse.Result, &readResult); err != nil {
+			return fmt.Errorf("decode existing chat: %w", err)
+		}
+		if readResult.Thread.ID != threadID || readResult.Thread.Path == "" {
+			return errors.New("existing chat has no resumable history path")
+		}
+		if readResult.Thread.Status.Type == "active" {
+			return errChatActive
+		}
+		sourcePath = readResult.Thread.Path
+		sourceCWD = readResult.Thread.CWD
+		sourceModelProvider = readResult.Thread.ModelProvider
+	} else {
+		if !strings.Contains(strings.ToLower(err.Error()), "thread not loaded") {
+			return fmt.Errorf("read existing chat: %w", err)
+		}
+		loaded, loadedErr := loadedThreadIDs(ctx, source)
+		if loadedErr != nil || containsThreadID(loaded, threadID) {
+			return fmt.Errorf("read existing chat: %w", err)
+		}
+		var fallbackErr error
+		sourcePath, sourceCWD, sourceModelProvider, fallbackErr = findThreadRolloutForMigration(sourceHome, threadID)
+		if fallbackErr != nil {
+			return fmt.Errorf("read existing chat: %w; disk history fallback: %v", err, fallbackErr)
+		}
 	}
 	if err := ensureThreadUnloaded(ctx, target, threadID); err != nil {
 		return fmt.Errorf("prepare target chat: %w", err)
 	}
-	targetPath, err := copyThreadRolloutLineage(sourceHome, targetHome, threadID, readResult.Thread.Path)
+	targetPath, err := copyThreadRolloutLineage(sourceHome, targetHome, threadID, sourcePath)
 	if err != nil {
 		return fmt.Errorf("copy existing chat history: %w", err)
 	}
@@ -74,9 +92,10 @@ func resumeThreadBetweenAccounts(
 		"threadId":      threadID,
 		"history":       nil,
 		"path":          targetPath,
-		"cwd":           readResult.Thread.CWD,
+		"cwd":           sourceCWD,
 		"model":         nil,
-		"modelProvider": readResult.Thread.ModelProvider,
+		"modelProvider": sourceModelProvider,
+		"excludeTurns":  true,
 	})
 	if _, err := target.Request(ctx, "thread/resume", resumeParams); err != nil {
 		return fmt.Errorf("resume existing chat: %w", err)
@@ -85,6 +104,65 @@ func resumeThreadBetweenAccounts(
 	// resumes, ownership can commit without waiting for the idle source runtime
 	// to shut down. A later move back still unloads that runtime before copying.
 	return nil
+}
+
+func findThreadRolloutForMigration(sourceHome, threadID string) (string, string, string, error) {
+	if sourceHome == "" || threadID == "" {
+		return "", "", "", errors.New("source home and thread id are required")
+	}
+	sessionsRoot := filepath.Join(sourceHome, "sessions")
+	var candidates []string
+	err := filepath.WalkDir(sessionsRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 || !strings.HasSuffix(strings.ToLower(entry.Name()), ".jsonl") {
+			return nil
+		}
+		if !strings.Contains(strings.ToLower(entry.Name()), strings.ToLower(threadID)) {
+			return nil
+		}
+		belongs, metaErr := rolloutBelongsToThread(path, threadID)
+		if metaErr != nil {
+			return fmt.Errorf("inspect rollout %q: %w", path, metaErr)
+		}
+		if belongs {
+			candidates = append(candidates, filepath.Clean(path))
+		}
+		return nil
+	})
+	if err != nil {
+		return "", "", "", fmt.Errorf("discover retained chat history: %w", err)
+	}
+	if len(candidates) == 0 {
+		return "", "", "", errors.New("no retained rollout history found")
+	}
+	sort.Strings(candidates)
+	currentPath := candidates[len(candidates)-1]
+
+	file, err := os.Open(currentPath)
+	if err != nil {
+		return "", "", "", err
+	}
+	defer file.Close()
+	var meta struct {
+		Type    string `json:"type"`
+		Payload struct {
+			CWD           string `json:"cwd"`
+			ModelProvider string `json:"model_provider"`
+		} `json:"payload"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(file, sessionMetadataReadLimit))
+	if err := decoder.Decode(&meta); err != nil {
+		return "", "", "", fmt.Errorf("read retained rollout metadata: %w", err)
+	}
+	if meta.Type != "session_meta" {
+		return "", "", "", errors.New("retained rollout has no session metadata")
+	}
+	return currentPath, meta.Payload.CWD, meta.Payload.ModelProvider, nil
 }
 
 func withImmediateThreadUnload(args []string) []string {

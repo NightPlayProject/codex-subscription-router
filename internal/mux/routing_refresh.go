@@ -2,13 +2,13 @@ package mux
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"sort"
-	"time"
 )
 
 // RoutingStatus reports preparation separately from message submission.
 type RoutingStatus struct {
+	Loading  int    `json:"loading"`
 	Running  bool   `json:"running"`
 	Total    int    `json:"total"`
 	Ready    int    `json:"ready"`
@@ -20,7 +20,11 @@ type RoutingStatus struct {
 func (m *Multiplexer) RoutingStatus() RoutingStatus {
 	m.batchMu.Lock()
 	defer m.batchMu.Unlock()
-	return m.batchStatus
+	status := m.batchStatus
+	m.migrationMu.RLock()
+	status.Loading = len(m.migrating)
+	m.migrationMu.RUnlock()
+	return status
 }
 
 func (m *Multiplexer) PrepareExistingChats(accountID string) {
@@ -44,6 +48,8 @@ func (m *Multiplexer) PrepareExistingChats(accountID string) {
 		return
 	}
 	go func() {
+		loadedByOwner := make(map[string]map[string]struct{})
+		unavailableOwners := make(map[string]struct{})
 		for _, id := range ids {
 			m.batchMu.Lock()
 			current := m.batchGeneration == generation
@@ -60,36 +66,45 @@ func (m *Multiplexer) PrepareExistingChats(accountID string) {
 			deferred := false
 			var err error
 			if ok && owner != accountID {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*requestTimeout)
-				child, exists := m.child(owner)
-				if !exists {
+				if _, unavailable := unavailableOwners[owner]; unavailable {
 					deferred = true
 				} else {
-					params, _ := json.Marshal(map[string]any{"threadId": id, "includeTurns": false})
-					response, readErr := child.Request(ctx, "thread/read", params)
-					var result struct {
-						Thread struct {
-							Status struct {
-								Type string `json:"type"`
-							} `json:"status"`
-						} `json:"thread"`
-					}
-					err = readErr
-					if err == nil {
-						err = json.Unmarshal(response.Result, &result)
-					}
-					if err == nil {
-						switch result.Thread.Status.Type {
-						case "idle":
-							err = m.moveThreadToAccount(ctx, id, owner, accountID)
-						default:
-							// Cold chats switch on resume. Do not load an entire
-							// history library and start tools just to change routing.
+					loaded, cached := loadedByOwner[owner]
+					if !cached {
+						ctx, cancel := context.WithTimeout(context.Background(), 2*requestTimeout)
+						child, exists := m.child(owner)
+						if !exists {
+							unavailableOwners[owner] = struct{}{}
 							deferred = true
+						} else {
+							loadedIDs, listErr := loadedThreadIDs(ctx, child)
+							if listErr != nil {
+								unavailableOwners[owner] = struct{}{}
+								deferred = true
+							} else {
+								loaded = make(map[string]struct{}, len(loadedIDs))
+								for _, loadedID := range loadedIDs {
+									loaded[loadedID] = struct{}{}
+								}
+								loadedByOwner[owner] = loaded
+							}
+						}
+						cancel()
+					}
+					if !deferred {
+						if _, isLoaded := loaded[id]; !isLoaded {
+							deferred = true
+						} else {
+							ctx, cancel := context.WithTimeout(context.Background(), 2*requestTimeout)
+							err = m.moveThreadToAccount(ctx, id, owner, accountID)
+							cancel()
+							if errors.Is(err, errChatActive) {
+								err = nil
+								deferred = true
+							}
 						}
 					}
 				}
-				cancel()
 			}
 			unlock()
 			m.batchMu.Lock()
@@ -106,8 +121,6 @@ func (m *Multiplexer) PrepareExistingChats(accountID string) {
 				m.batchStatus.Ready++
 			}
 			m.batchMu.Unlock()
-			// Yield between chats so account controls and foreground requests stay responsive.
-			time.Sleep(time.Millisecond)
 		}
 		m.batchMu.Lock()
 		if m.batchGeneration == generation {

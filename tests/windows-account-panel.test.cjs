@@ -143,3 +143,16 @@ test('outside pointer closes panel while inside pointer leaves it open', async (
   assert.equal(panel.classList.contains('cmx-hidden'), true);
   assert.equal(ui.button('Subscriptions').attributes['aria-expanded'], 'false');
 });
+
+test('history loading is indeterminate and preparation progress counts checked chats', async () => {
+ const ui = await setup();
+ ui.state.preparation = {running:true,total:10,ready:2,deferred:3,failed:1};
+ ui.button('Refresh').events.click(); await settle();
+ let bar=ui.all().find(item => item.tag === 'progress');
+ assert.equal(bar.max,10); assert.equal(bar.value,6);
+ ui.state.preparation.loading=1;
+ await ui.state.poll();
+ bar=ui.all().find(item => item.tag === 'progress');
+ assert.equal(bar.value,undefined);
+ assert.equal(bar.attributes['aria-label'],'Loading chat history…');
+});

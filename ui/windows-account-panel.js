@@ -384,6 +384,21 @@
 	  routingHelp.style.marginTop = "6px";
 	  routingHelp.textContent = "Applies to every new and existing chat. Running replies finish first. ChatGPT Web models use the account signed in to ChatGPT Web.";
 	  panel.appendChild(routingHelp);
+	  if (preparation.loading || preparation.running) {
+	    const loading = document.createElement("div");
+	    loading.className = "cmx-muted";
+	    loading.setAttribute("role", "status");
+	    loading.textContent = preparation.loading ? "Loading chat history…" : "Checking existing chats…";
+	    const bar = document.createElement("progress");
+	    bar.setAttribute("aria-label", loading.textContent);
+	    bar.style.width = "100%";
+	    bar.style.accentColor = "#a7c7ff";
+	    if (!preparation.loading && preparation.total) {
+	      bar.max = preparation.total;
+	      bar.value = (preparation.ready || 0) + (preparation.deferred || 0) + (preparation.failed || 0);
+	    }
+	    panel.append(loading, bar);
+	  }
 	  if (preparation.total) {
 	    const progress = document.createElement("div"); progress.className = "cmx-muted";
 	    progress.setAttribute("role", "status");
@@ -476,11 +491,19 @@
       if (event.key === "Escape") { panel.classList.add("cmx-hidden"); launch.setAttribute("aria-expanded", "false"); launch.focus(); }
     });
     setInterval(async () => {
-      if ((!login && !preparation.running) || busy || refreshing || editing) return;
+      if ((!login && !preparation.running && !preparation.loading && panel.classList.contains("cmx-hidden")) || busy || refreshing || editing) return;
       refreshing = true;
-      try { await refresh(); } catch { /* Preserve the sign-in card during transient network failures. */ }
+      try {
+        if (login) await refresh();
+        else {
+          const routing = await request("/routing-preference");
+          preparation = routing.preparation || {};
+          preferredNewThreadAccountId = routing.accountId || "";
+          render();
+        }
+      } catch { /* Preserve the current view during transient network failures. */ }
       finally { refreshing = false; }
-    }, 3000);
+    }, 1000);
 
     try {
       await refresh();
