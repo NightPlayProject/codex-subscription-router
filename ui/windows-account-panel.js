@@ -99,6 +99,18 @@
       #${ROOT_ID} button:active:not(:disabled){transform:scale(.97)}
       #${ROOT_ID} button:focus-visible,#${ROOT_ID} select:focus-visible{outline:2px solid #a7c7ff;outline-offset:3px}
       #${ROOT_ID} .cmx-login button{margin:6px 6px 0 0}
+      #${ROOT_ID} .cmx-history{margin-top:12px;padding:12px;border:1px solid #ffffff14;border-radius:12px;background:linear-gradient(135deg,#ffffff08,#ffffff02);display:grid;gap:8px}
+      #${ROOT_ID} .cmx-history-head{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px;font-weight:500}
+      #${ROOT_ID} .cmx-history-head strong{font-size:12px;font-weight:500;font-variant-numeric:tabular-nums;background:#ffffff0d;padding:3px 8px;border-radius:20px;color:#ddd}
+      #${ROOT_ID} .cmx-history-progress{appearance:none;width:100%;height:4px;border:0;border-radius:8px;overflow:hidden;background:#ffffff12;accent-color:#c8d5db}
+      #${ROOT_ID} .cmx-history-progress::-webkit-progress-bar{background:#ffffff12;border-radius:8px}
+      #${ROOT_ID} .cmx-history-progress::-webkit-progress-value{background:#c8d5db;border-radius:8px;transition:width .25s ease}
+      #${ROOT_ID} .cmx-history-progress:indeterminate{background:linear-gradient(90deg,#ffffff10,#c8d5db88,#ffffff10);background-size:200% 100%;animation:cmx-history-loading 1.5s ease infinite}
+      #${ROOT_ID} .cmx-history-warning{font-size:12px;color:#e5bc91;border-top:1px solid #ffffff10;padding-top:8px}
+      #${ROOT_ID} .cmx-history-warning summary{cursor:pointer}
+      #${ROOT_ID} .cmx-history-warning div{color:#bbb;margin-top:6px;overflow-wrap:anywhere}
+      @keyframes cmx-history-loading{to{background-position:-200% 0}}
+      @media(prefers-reduced-motion:reduce){#${ROOT_ID} .cmx-history-progress{animation:none}#${ROOT_ID} .cmx-history-progress::-webkit-progress-value{transition:none}}
       @media(prefers-reduced-motion:reduce){#${ROOT_ID} .cmx-panel,#${ROOT_ID} button,#${ROOT_ID} .cmx-select{transition:none;transform:none}}
     `;
     document.head.appendChild(style);
@@ -124,6 +136,21 @@
     root.append(panel, launch);
     document.body.appendChild(root);
 
+    // Native dropdowns close if their select is replaced during a poll.
+    let activeSelect = null;
+    let pendingRender = false;
+    function protectSelect(select) {
+      const hold = () => { activeSelect = select; };
+      const release = () => {
+        if (activeSelect !== select) return;
+        activeSelect = null;
+        if (pendingRender) { pendingRender = false; render(); }
+      };
+      select.addEventListener("pointerdown", hold);
+      select.addEventListener("focus", hold);
+      select.addEventListener("blur", release);
+      return release;
+    }
     let accounts = [];
     let busy = false;
     let login = null;
@@ -182,6 +209,7 @@
     }
 
     function render() {
+      if (activeSelect) { pendingRender = true; return; }
       const scrollTop = panel.scrollTop;
       panel.replaceChildren();
       const head = document.createElement("div");
@@ -382,7 +410,8 @@
 		option.selected = preferredNewThreadAccountId === account.id;
 		routingSelect.appendChild(option);
 	  }
-	  routingSelect.addEventListener("change", () => run(async () => {
+	  protectSelect(routingSelect);
+      routingSelect.addEventListener("change", () => { activeSelect = null; pendingRender = false; return run(async () => {
 		const updated = await request("/routing-preference", {
 		  method: "PUT",
 		  body: JSON.stringify({ accountId: routingSelect.value || "" }),
@@ -390,41 +419,53 @@
 		preferredNewThreadAccountId = updated.accountId || "";
 		globalThis.__codexMuxPluginAccountId = preferredNewThreadAccountId || accounts.find(a => a.controller && a.connected)?.id || null;
 		await refresh();
-	  }));
+	  }); });
 	  panel.append(routingLabel, routingSelect);
 	  const routingHelp = document.createElement("div");
 	  routingHelp.className = "cmx-muted";
 	  routingHelp.style.marginTop = "6px";
 	  routingHelp.textContent = "Applies to every new and existing chat. Running replies finish first. ChatGPT Web models use the account signed in to ChatGPT Web.";
 	  panel.appendChild(routingHelp);
-	  if (preparation.loading || preparation.running) {
-	    const loading = document.createElement("div");
-	    loading.className = "cmx-muted";
-	    loading.setAttribute("role", "status");
-	    loading.textContent = preparation.loading ? "Loading chat history…" : "Checking existing chats…";
-	    const bar = document.createElement("progress");
-	    bar.setAttribute("aria-label", loading.textContent);
-	    bar.style.width = "100%";
-	    bar.style.accentColor = "#a7c7ff";
-	    if (!preparation.loading && preparation.total) {
-	      bar.max = preparation.total;
-	      bar.value = (preparation.ready || 0) + (preparation.deferred || 0) + (preparation.failed || 0);
-	    }
-	    panel.append(loading, bar);
-	  }
-	  if (preparation.total) {
-	    const progress = document.createElement("div"); progress.className = "cmx-muted";
-	    progress.setAttribute("role", "status");
-	    progress.textContent = preparation.running
-	      ? `Updating existing chats… ${preparation.ready || 0} of ${preparation.total} ready`
-	      : `${preparation.ready || 0} chats ready${preparation.deferred ? ` · ${preparation.deferred} switch when reopened or after their reply` : ""}`;
-	    panel.appendChild(progress);
-	    if (preparation.failed) {
-	      const failure = document.createElement("div"); failure.className = "cmx-error";
-	      failure.textContent = `${preparation.failed} chats could not switch. ${preparation.error || "Try selecting the subscription again."}`;
-	      panel.appendChild(failure);
-	    }
-	  }
+      if (preparation.loading || preparation.running || preparation.total) {
+        const card = document.createElement("div");
+        card.className = "cmx-history";
+        const heading = document.createElement("div");
+        heading.className = "cmx-history-head";
+        const label = document.createElement("span");
+        label.textContent = preparation.loading ? "Loading chat history" : preparation.running ? "Preparing chats" : "Chat readiness";
+        const count = document.createElement("strong");
+        count.textContent = `${preparation.ready || 0} ready`;
+        heading.append(label, count);
+        card.appendChild(heading);
+        if (preparation.loading || preparation.running) {
+          const bar = document.createElement("progress");
+          bar.className = "cmx-history-progress";
+          bar.setAttribute("aria-label", preparation.loading ? "Loading chat history…" : "Checking existing chats…");
+          if (!preparation.loading && preparation.total) {
+            bar.max = preparation.total;
+            bar.value = (preparation.ready || 0) + (preparation.deferred || 0) + (preparation.failed || 0);
+          }
+          card.appendChild(bar);
+        }
+        const detail = document.createElement("div");
+        detail.className = "cmx-muted";
+        detail.setAttribute("role", "status");
+        detail.textContent = preparation.loading ? "Finding your saved conversations…"
+          : preparation.running ? `Checking ${preparation.total || 0} chats. You can keep working.`
+          : `${preparation.ready || 0} chats ready${preparation.deferred ? ` · ${preparation.deferred} switch when reopened or after their reply` : ""}`;
+        card.appendChild(detail);
+        if (preparation.failed) {
+          const failure = document.createElement("details");
+          failure.className = "cmx-history-warning";
+          const summary = document.createElement("summary");
+          summary.textContent = `${preparation.failed} chats need attention`;
+          const reason = document.createElement("div");
+          reason.textContent = preparation.error || "Try selecting the subscription again.";
+          failure.append(summary, reason);
+          card.appendChild(failure);
+        }
+        panel.appendChild(card);
+      }
 
       const pluginLabel = document.createElement("div");
       pluginLabel.className = "cmx-muted";
@@ -441,8 +482,10 @@
         option.selected = globalThis.__codexMuxPluginAccountId === account.id;
         pluginSelect.appendChild(option);
       }
+      const releasePluginSelect = protectSelect(pluginSelect);
       pluginSelect.addEventListener("change", () => {
         globalThis.__codexMuxPluginAccountId = pluginSelect.value || null;
+        releasePluginSelect();
       });
       panel.append(pluginLabel, pluginSelect);
 
@@ -527,11 +570,13 @@
     launch.setAttribute("aria-expanded", "false");
     document.addEventListener("pointerdown", (event) => {
       if (!root.contains(event.target)) {
+        activeSelect = null;
         panel.classList.add("cmx-hidden");
         launch.setAttribute("aria-expanded", "false");
       }
     }, true);
     root.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && activeSelect) { activeSelect = null; return; }
       if (event.key === "Escape") { panel.classList.add("cmx-hidden"); launch.setAttribute("aria-expanded", "false"); launch.focus(); }
     });
     setInterval(async () => {

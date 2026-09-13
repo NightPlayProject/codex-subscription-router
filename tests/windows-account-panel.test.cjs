@@ -132,7 +132,7 @@ test('preparation progress refreshes and failures stay visible in the panel', as
   const ui = await setup();
   ui.state.preparation = {running:true,total:3,ready:1};
   ui.button('Refresh').events.click(); await settle();
-  assert(ui.all().some(item => item.textContent === 'Updating existing chats… 1 of 3 ready'));
+  assert(ui.all().some(item => item.textContent === '1 ready'));
   ui.state.preparation = {running:false,total:3,ready:2,failed:1,error:'History unavailable'};
   await ui.state.poll();
   assert(ui.all().some(item => item.textContent?.includes('History unavailable')));
@@ -171,4 +171,31 @@ test('history loading is indeterminate and preparation progress counts checked c
  bar=ui.all().find(item => item.tag === 'progress');
  assert.equal(bar.value,undefined);
  assert.equal(bar.attributes['aria-label'],'Loading chat history…');
+});
+
+
+test('open dropdown survives polling and update completion until blur', async () => {
+  const ui = await setup();
+  ui.state.preparation = {running:true,total:3,ready:0};
+  const select = ui.all().find(item => item.attributes['aria-label'] === 'Plugins and MCP subscription');
+  ui.all().find(item => item.className?.includes('cmx-panel')).className = 'cmx-panel';
+  select.events.pointerdown();
+  await ui.state.poll();
+  ui.button('Check for updates').events.click(); await settle();
+  assert(ui.all().includes(select), 'refresh replaced an open dropdown');
+  select.events.blur();
+  assert(!ui.all().includes(select));
+  assert(ui.all().some(item => item.textContent === 'Preparing chats'));
+});
+
+test('dropdown selection commits while background render is pending', async () => {
+  const ui = await setup();
+  const select = ui.all().find(item => item.attributes['aria-label'] === 'Subscription for all chats');
+  select.events.focus();
+  ui.button('Check for updates').events.click(); await settle();
+  assert(ui.all().includes(select));
+  select.value = 'primary';
+  select.events.change(); await settle();
+  assert.equal(ui.state.accountId, 'primary');
+  assert(!ui.all().includes(select));
 });
