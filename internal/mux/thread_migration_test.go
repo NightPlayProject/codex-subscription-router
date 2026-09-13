@@ -212,6 +212,9 @@ func TestResumeThreadBetweenAccountsUsesTargetLocalPathAndUnloadsStaleTarget(t *
 	if err := resumeThreadBetweenAccounts(context.Background(), threadID, sourceHome, targetHome, source, target); err != nil {
 		t.Fatal(err)
 	}
+	if len(source.calls) != 1 || source.calls[0].method != "thread/read" {
+		t.Fatal("successful migration must not wait for source runtime cleanup")
+	}
 	wantPath := filepath.Join(targetHome, "sessions", "2026", "09", "12", filepath.Base(sourcePath))
 	if resumePath != wantPath {
 		t.Fatalf("thread/resume path = %q, want target-local %q", resumePath, wantPath)

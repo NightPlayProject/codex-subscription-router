@@ -82,6 +82,27 @@ func TestDiscoveryCannotUndoMigration(t *testing.T) {
 	}
 }
 
+func TestOldAccountCloseAfterMigrationDoesNotCloseCurrentChat(t *testing.T) {
+	store, err := state.Open(filepath.Join(t.TempDir(), "mux"), filepath.Join(t.TempDir(), "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetThreadOwner("chat", "secondary"); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	m := &Multiplexer{store: store, output: &output}
+	message := protocol.Message{Method: "thread/closed", Params: json.RawMessage(`{"threadId":"chat"}`)}
+	m.handleInbound(backend.Inbound{AccountID: "primary", Message: message, Raw: []byte("old")})
+	if output.Len() != 0 {
+		t.Fatal("old account closed current chat")
+	}
+	m.handleInbound(backend.Inbound{AccountID: "secondary", Message: message, Raw: []byte("current")})
+	if output.String() != "current\n" {
+		t.Fatal("current account lifecycle event was lost")
+	}
+}
+
 func TestPreparationIncludesEveryKnownChatAndAutomaticClearsProgress(t *testing.T) {
 	store, err := state.Open(filepath.Join(t.TempDir(), "mux"), filepath.Join(t.TempDir(), "primary"))
 	if err != nil {

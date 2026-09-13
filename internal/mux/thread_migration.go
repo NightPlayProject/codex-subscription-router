@@ -81,9 +81,9 @@ func resumeThreadBetweenAccounts(
 	if _, err := target.Request(ctx, "thread/resume", resumeParams); err != nil {
 		return fmt.Errorf("resume existing chat: %w", err)
 	}
-	if err := ensureThreadUnloaded(ctx, source, threadID); err != nil {
-		return fmt.Errorf("release source chat: %w", err)
-	}
+	// The source was checked for an active turn before copying. Once the target
+	// resumes, ownership can commit without waiting for the idle source runtime
+	// to shut down. A later move back still unloads that runtime before copying.
 	return nil
 }
 

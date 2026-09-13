@@ -584,6 +584,10 @@ func (m *Multiplexer) handleInbound(inbound backend.Inbound) {
 		if internal {
 			return
 		}
+		if owner, known := m.store.ThreadOwner(id); known && owner != inbound.AccountID {
+			// An old account may close its idle copy after migration commits.
+			return
+		}
 	}
 	if message.Method == "" && len(message.ID) > 0 {
 		key := protocol.RequestIDKey(message.ID)
