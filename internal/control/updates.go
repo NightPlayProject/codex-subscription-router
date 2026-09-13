@@ -61,13 +61,13 @@ func newUpdateManager() *updateManager {
 	return m
 }
 
-func (m *updateManager) check(ctx context.Context) updateStatus {
+func (m *updateManager) check(ctx context.Context, force bool) updateStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.current == "" {
 		return updateStatus{}
 	}
-	if m.checked.IsZero() || time.Since(m.checked) >= time.Hour {
+	if force || m.checked.IsZero() || time.Since(m.checked) >= time.Hour {
 		m.checked = time.Now()
 		m.status = updateStatus{Supported: true, Current: m.current}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.url, nil)
@@ -148,5 +148,5 @@ func (s *Server) updates(response http.ResponseWriter, request *http.Request) {
 			return
 		}
 	}
-	writeJSON(response, http.StatusOK, s.updater.check(request.Context()))
+	writeJSON(response, http.StatusOK, s.updater.check(request.Context(), request.Method == http.MethodGet))
 }
