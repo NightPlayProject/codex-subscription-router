@@ -77,19 +77,19 @@
     `;
     style.textContent += `
       #${ROOT_ID}{font-size:15px;line-height:1.45}
-      #${ROOT_ID} .cmx-panel{width:min(440px,calc(100vw - 32px));padding:18px;max-height:calc(100vh - 88px)}
-      #${ROOT_ID} .cmx-title{font-size:18px}
-      #${ROOT_ID} .cmx-name{font-size:18px;white-space:normal;overflow-wrap:anywhere}
+      #${ROOT_ID} .cmx-panel{width:min(390px,calc(100vw - 32px));padding:14px;max-height:min(620px,calc(100vh - 80px))}
+      #${ROOT_ID} .cmx-title{font-size:16px}
+      #${ROOT_ID} .cmx-name{font-size:16px;white-space:normal;overflow-wrap:anywhere}
       #${ROOT_ID} .cmx-muted,#${ROOT_ID} .cmx-sub{font-size:13px}
       #${ROOT_ID} .cmx-sub{letter-spacing:.12em;margin-top:5px}
-      #${ROOT_ID} .cmx-row{padding:16px 0}
-      #${ROOT_ID} .cmx-usage{gap:5px;margin-top:7px}
+      #${ROOT_ID} .cmx-row{padding:10px 0}
+      #${ROOT_ID} .cmx-usage{gap:3px;margin-top:4px}
       #${ROOT_ID} .cmx-usage-row{display:grid;grid-template-columns:52px auto minmax(0,1fr);font-size:15px;gap:10px}
       #${ROOT_ID} .cmx-usage-reset{text-align:right;font-size:13px;color:#aaa}
-      #${ROOT_ID} .cmx-summary{padding:14px 0;border-top:1px solid #ffffff20}
-      #${ROOT_ID} .cmx-summary-title{font-size:18px;font-weight:600}
-      #${ROOT_ID} .cmx-total{display:flex;justify-content:space-between;gap:12px;margin-top:7px;font-size:16px}
-      #${ROOT_ID} .cmx-total strong{font-size:22px;font-variant-numeric:tabular-nums}
+      #${ROOT_ID} .cmx-summary{padding:10px 0;border-top:1px solid #ffffff20}
+      #${ROOT_ID} .cmx-summary-title{font-size:16px;font-weight:600}
+      #${ROOT_ID} .cmx-total{display:flex;justify-content:space-between;gap:12px;margin-top:4px;font-size:15px}
+      #${ROOT_ID} .cmx-total strong{font-size:18px;font-variant-numeric:tabular-nums}
       #${ROOT_ID} .cmx-panel{transform-origin:bottom right;transition:opacity .16s ease,transform .16s ease,visibility .16s;opacity:1;transform:translateY(0) scale(1);scrollbar-gutter:stable}
       #${ROOT_ID} .cmx-panel.cmx-hidden{display:block;position:absolute;bottom:42px;right:0;opacity:0;visibility:hidden;pointer-events:none;transform:translateY(8px) scale(.98)}
       #${ROOT_ID} .cmx-row{grid-template-columns:minmax(0,1fr);gap:8px}
