@@ -45,10 +45,14 @@ try {
   Invoke-Checked $go vet ./...
   Invoke-Checked $node --check ui/windows-account-panel.js
   Invoke-Checked $node --test tests/windows-account-panel.test.cjs
+  Invoke-Checked $node --test third_party/codex-wallpapers/tests/core.test.mjs
+  Invoke-Checked $node --check third_party/codex-wallpapers/src/apply.mjs
   Invoke-Checked $python -m py_compile scripts/patch_app_windows.py tests/test_patch_app_windows.py
   Invoke-Checked $python -m unittest tests/test_patch_app_windows.py
+  Invoke-Checked powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/windows-launcher.test.ps1
+  Invoke-Checked powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/windows-endpoint.test.ps1
 
-  foreach ($scriptName in @('install.ps1', 'install-windows.ps1')) {
+  foreach ($scriptName in @('install.ps1', 'install-windows.ps1', 'windows/Start.ps1', 'windows/Wallpapers.ps1', 'windows/identity.ps1')) {
     $tokens = $null
     $errors = $null
     [System.Management.Automation.Language.Parser]::ParseFile(

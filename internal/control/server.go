@@ -15,6 +15,7 @@ import (
 )
 
 type Server struct {
+	updater *updateManager
 	token   string
 	mux     *mux.Multiplexer
 	uiTests bool
@@ -22,9 +23,10 @@ type Server struct {
 }
 
 func New(address, token string, multiplexer *mux.Multiplexer, uiTests bool) *Server {
-	server := &Server{token: token, mux: multiplexer, uiTests: uiTests}
+	server := &Server{token: token, mux: multiplexer, uiTests: uiTests, updater: newUpdateManager()}
 	router := http.NewServeMux()
 	router.HandleFunc("/v1/health", server.health)
+	router.HandleFunc("/v1/updates", server.updates)
 	router.HandleFunc("/v1/accounts", server.accounts)
 	router.HandleFunc("/v1/accounts/", server.accountAction)
 	router.HandleFunc("/v1/routing-preference", server.routingPreference)

@@ -129,6 +129,19 @@
     let login = null;
     let refreshing = false;
     let error = "";
+    let update = null;
+    let updateBusy = false;
+    let updateCheckedAt = 0;
+    async function checkUpdates() {
+      if (updateBusy) return;
+      updateBusy = true;
+      render();
+      try {
+        update = await request('/updates');
+        updateCheckedAt = Date.now();
+      } catch (caught) { update = { supported: true, error: caught?.message || String(caught) }; }
+      finally { updateBusy = false; render(); }
+    }
 	let editing = null;
 	let preparation = {};
 	let preferredNewThreadAccountId = "";
@@ -444,6 +457,36 @@
       }));
       panel.appendChild(add);
 
+      const updates = document.createElement('div');
+      updates.className = 'cmx-summary';
+      updates.style.marginTop = '12px';
+      const updateLabel = document.createElement('div');
+      updateLabel.className = 'cmx-muted';
+      updateLabel.setAttribute('role', 'status');
+      updateLabel.textContent = updateBusy ? 'Checking for updates…'
+        : update?.queued ? 'Update queued. Close Codex when ready, then open the Start menu shortcut. Updating may take a few minutes.'
+        : update?.error ? `Could not check for updates: ${update.error}`
+        : update?.available ? 'An update is available for the combined app.'
+        : update?.supported ? 'Router + wallpapers are up to date.'
+        : 'Install the combined app to enable updates.';
+      const check = createButton('Check for updates');
+      check.disabled = updateBusy;
+      check.addEventListener('click', checkUpdates);
+      updates.append(updateLabel, check);
+      if (update?.available && !update.queued) {
+        const queue = createButton('Update on next launch');
+        queue.disabled = updateBusy;
+        queue.addEventListener('click', async () => {
+          if (updateBusy) return;
+          updateBusy = true; render();
+          try { update = await request('/updates', { method: 'POST', body: '{}' }); }
+          catch (caught) { update = { ...update, error: caught?.message || String(caught) }; }
+          finally { updateBusy = false; render(); }
+        });
+        updates.appendChild(queue);
+      }
+      panel.appendChild(updates);
+
       if (login) {
         const loginBox = document.createElement("div");
         loginBox.className = "cmx-login";
@@ -479,6 +522,7 @@
       panel.classList.toggle("cmx-hidden");
       launch.setAttribute("aria-expanded", String(!panel.classList.contains("cmx-hidden")));
       if (!panel.classList.contains("cmx-hidden")) run(refresh);
+      if (Date.now() - updateCheckedAt > 60 * 60 * 1000) checkUpdates();
     });
     launch.setAttribute("aria-expanded", "false");
     document.addEventListener("pointerdown", (event) => {
@@ -511,6 +555,7 @@
       error = caught?.message || String(caught);
       render();
     }
+    checkUpdates();
   }
 
   if (document.readyState === "loading") {

@@ -1,6 +1,7 @@
 /build/
 /dist/
 /node_modules/
+/third_party/codex-wallpapers/test-results/
 __pycache__/
 *.pyc
 /.DS_Store

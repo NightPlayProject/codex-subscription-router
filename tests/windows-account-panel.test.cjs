@@ -37,6 +37,10 @@ async function setup() {
       state.calls.push([route, options.method]);
       if (state.failRouting && route === '/routing-preference' && options.method === 'PUT') return { ok: false, json: async () => ({ error: 'Refresh failed' }) };
       let result = {};
+      if (route === '/updates') {
+        if (options.method === 'POST') state.update = {...state.update, queued:true};
+        return {ok:true,json:async()=>state.update || {supported:true}};
+      }
       if (route === '/accounts' && options.method === 'POST') {
         const account = { id: 'new-account', label: 'Work', enabled: true, connected: false, threadCount: 0 };
         state.accounts.push(account); result = { account };
@@ -60,6 +64,18 @@ async function setup() {
   const button = label => all().find(item => item.tag === 'button' && item.textContent === label);
   return { state, context, all, button };
 }
+
+test('updates are checked independently and queued explicitly for next launch', async () => {
+  const ui = await setup();
+  assert(ui.state.calls.some(([route]) => route === '/updates'));
+  ui.state.update = {supported:true,available:true};
+  ui.button('Check for updates').events.click(); await settle();
+  assert(ui.button('Update on next launch'));
+  assert(!ui.state.calls.some(([route,method])=>route==='/updates' && method==='POST'));
+  ui.button('Update on next launch').events.click(); await settle();
+  assert(ui.all().some(item=>item.textContent?.startsWith('Update queued.')));
+  assert(!ui.button('Update on next launch'));
+});
 
 test('device code clears after a successful background sign-in refresh', async () => {
   const ui = await setup();

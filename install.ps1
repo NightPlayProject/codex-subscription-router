@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [switch]$Force,
+  [switch]$SkipShortcut,
   [string]$Destination = (Join-Path $env:LOCALAPPDATA 'Programs\Codex Subscription Router'),
   [string]$GoExe = ''
 )
@@ -10,6 +11,10 @@ $ExpectedVersion = '26.908.4834.0'
 $ExpectedAsarSha256 = '2BD5B96A48232F3CCF3DF6BE50965920699EA3A1B4512DCDD770E209FD1F009E'
 $ProjectRoot = $PSScriptRoot
 $Destination = [System.IO.Path]::GetFullPath($Destination)
+$FinalDestination = $Destination
+if ($Destination -eq [IO.Path]::GetPathRoot($Destination) -or $Destination.StartsWith((Join-Path $env:ProgramFiles 'WindowsApps'), [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Destination must be a dedicated writable application folder outside WindowsApps.'
+}
 
 function Invoke-Checked {
   param(
@@ -58,6 +63,7 @@ function Move-StagedDestinationToBackup {
   Move-Item -LiteralPath $Path -Destination $backup
   if ($Reason) { Write-Host $Reason }
   Write-Host "Existing staged copy moved to $backup"
+  return $backup
 }
 
 function Assert-StagedRouterIsClosed {
@@ -111,18 +117,9 @@ try {
   Pop-Location
 }
 
-if (Test-Path -LiteralPath $Destination) {
-  $existingLauncher = Join-Path $Destination 'Launch-CodexSubscriptionRouter.ps1'
-  $existingRealCli = Join-Path $Destination 'app\resources\codex.real.exe'
-  $existingAsar = Join-Path $Destination 'app\resources\app.asar'
-  $looksComplete =
-    (Test-Path -LiteralPath $existingLauncher -PathType Leaf) -and
-    (Test-Path -LiteralPath $existingRealCli -PathType Leaf) -and
-    (Test-Path -LiteralPath $existingAsar -PathType Leaf)
-  $reason = if ($looksComplete) { 'Existing staged router detected; creating a recoverable backup before upgrading.' } else { 'Incomplete staged router detected; recovering automatically.' }
-  Move-StagedDestinationToBackup -Path $Destination -Reason $reason
-}
-
+# Build the complete replacement first. A failed download/build/patch leaves
+# the currently installed application intact.
+$Destination = $FinalDestination + '.staging-' + [guid]::NewGuid().ToString('N')
 New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 $null = & robocopy.exe $source $Destination /E /COPY:DAT /DCOPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS /NP
 if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
@@ -151,9 +148,54 @@ if ((Get-FileHash -LiteralPath $installedMux -Algorithm SHA256).Hash -ne (Get-Fi
 $officialAfter = (Get-FileHash -LiteralPath $sourceAsar -Algorithm SHA256).Hash
 if ($officialAfter -ne $ExpectedAsarSha256) { throw 'Official app.asar changed unexpectedly during installation.' }
 
+New-Item -ItemType Directory -Path (Join-Path $Destination 'wallpapers\windows') -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $ProjectRoot 'third_party\codex-wallpapers\src') -Destination (Join-Path $Destination 'wallpapers\src') -Recurse
+foreach ($notice in @('LICENSE', 'UPSTREAM.md')) {
+  Copy-Item -LiteralPath (Join-Path $ProjectRoot "third_party\codex-wallpapers\$notice") -Destination (Join-Path $Destination 'wallpapers')
+}
+Copy-Item -LiteralPath (Join-Path $ProjectRoot 'windows\identity.ps1') -Destination (Join-Path $Destination 'wallpapers\windows\identity.ps1')
+Copy-Item -LiteralPath (Join-Path $ProjectRoot 'windows\Wallpapers.ps1') -Destination $Destination
+$revision = (& git.exe -C $ProjectRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $revision -cnotmatch '^[a-f0-9]{40}$') { throw 'Could not identify the installed source revision.' }
+@{ revision = $revision; wallpapers = '054348d193b4f68a0f96c1ae0f900776c2d2616c' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Destination 'build-info.json') -Encoding ASCII
+
+# The small shortcut dispatcher lives outside the replaceable application.
+$launcherRoot = Join-Path $env:LOCALAPPDATA 'Codex Subscription Router\Launcher'
+$launcherBuild = Join-Path $buildDir 'CodexSubscriptionRouter.exe'
+$compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+$icon = Join-Path $source 'app\resources\chatgpt-app-dark.ico'
+Invoke-Checked $compiler /nologo /target:winexe /reference:System.Windows.Forms.dll ('/out:' + $launcherBuild) ('/win32icon:' + $icon) (Join-Path $ProjectRoot 'windows\Launcher.cs')
+$launcherExe = Join-Path $launcherRoot 'CodexSubscriptionRouter.exe'
+$candidate = $Destination
+$Destination = $FinalDestination
+Assert-StagedRouterIsClosed
+$backup = $null
+if (Test-Path -LiteralPath $Destination) {
+  $backup = Move-StagedDestinationToBackup -Path $Destination -Reason 'Creating a recoverable backup before replacing the staged app.'
+}
+try { Move-Item -LiteralPath $candidate -Destination $Destination } catch {
+  if ($backup -and -not (Test-Path -LiteralPath $Destination)) { Move-Item -LiteralPath $backup -Destination $Destination }
+  throw
+}
+if (-not $SkipShortcut) {
+  New-Item -ItemType Directory -Path $launcherRoot -Force | Out-Null
+  if (-not (Test-Path -LiteralPath $launcherExe)) { Copy-Item -LiteralPath $launcherBuild -Destination $launcherExe }
+  Copy-Item -LiteralPath (Join-Path $ProjectRoot 'windows\Start.ps1') -Destination $launcherRoot -Force
+  @{ destination = $Destination; goExe = $go } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $launcherRoot 'install.json') -Encoding UTF8
+  $shell = New-Object -ComObject WScript.Shell
+  $shortcut = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Programs')) 'Codex Subscription Router.lnk'))
+  $shortcut.TargetPath = $launcherExe
+  $shortcut.WorkingDirectory = $launcherRoot
+  $shortcut.Description = 'Codex with subscription routing and wallpapers'
+  $shortcut.IconLocation = $launcherExe + ',0'
+  $shortcut.Save()
+}
+$launcher = Join-Path $Destination 'Launch-CodexSubscriptionRouter.ps1'
+
 Write-Host ''
 Write-Host "Staged Windows build: $Destination"
 Write-Host "Launcher: $launcher"
+if (-not $SkipShortcut) { Write-Host 'Open Codex Subscription Router from Start; pin that shortcut to the taskbar for everyday use.' }
 Write-Host 'The official ChatGPT/Codex installation was not modified or restarted.'
 Write-Host 'This installer does not launch the staged copy automatically.'
 if ($Force) { Write-Verbose '-Force is no longer required; it remains accepted for compatibility with older commands.' }

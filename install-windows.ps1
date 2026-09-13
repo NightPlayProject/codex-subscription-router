@@ -73,12 +73,12 @@ if ($GoExe) { $arguments += @('-GoExe', $GoExe) }
 Write-Host 'Installing or upgrading Codex Subscription Router...'
 Invoke-Checked 'powershell.exe' @arguments
 
-$launcher = Join-Path ([System.IO.Path]::GetFullPath($Destination)) 'Launch-CodexSubscriptionRouter.ps1'
+$launcher = Join-Path $env:LOCALAPPDATA 'Codex Subscription Router\Launcher\CodexSubscriptionRouter.exe'
 if ($Launch) {
   Write-Host 'Launching Codex Subscription Router...'
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launcher
+  Start-Process -FilePath $launcher -WindowStyle Hidden
 } else {
   Write-Host ''
-  Write-Host 'Install/update complete. Launch when ready with:'
-  Write-Host "& `"$launcher`""
+  Write-Host 'Install/update complete. Open Codex Subscription Router from Start.'
+  Write-Host 'Pin that shortcut to your taskbar. Future updates can be queued in the Subscriptions panel.'
 }

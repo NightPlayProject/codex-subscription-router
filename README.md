@@ -191,7 +191,19 @@ For the fastest install, run this once in PowerShell:
 irm https://raw.githubusercontent.com/NightPlayProject/codex-subscription-router/main/install-windows.ps1 | iex
 ```
 
-Run the same command again whenever you want to upgrade. The bootstrap keeps a
+After this one-time install, open **Codex Subscription Router** from Start and
+pin that shortcut to the taskbar. It opens the isolated Codex app with both
+subscription routing and [Codex Wallpapers](third_party/codex-wallpapers/UPSTREAM.md).
+The original Store shortcut continues to open the official app.
+
+The Subscriptions panel automatically checks GitHub for updates on startup and
+when reopened after an hour. **Update on next launch** queues the detected
+revision. Close the staged app when convenient, then open the combined shortcut.
+It downloads and builds that exact revision before opening Codex; this can take
+a few minutes. It never closes active chats automatically. Build prerequisites
+(Git, Go, Node/npm and Python) are still required for updates.
+
+You can also run the install command again to upgrade. The bootstrap keeps a
 managed source checkout under `%LOCALAPPDATA%\Codex Subscription Router\Source`,
 fast-forwards it to the latest `main`, prepares the locked npm dependency, and
 runs the Windows installer. Existing staged installs and incomplete staging
@@ -210,11 +222,24 @@ bundled `codex.exe` with the router, and keeps the original CLI beside it as
 `codex.real.exe`. It does not stop, restart, or modify the official Store app and
 does not launch the staged copy automatically.
 
-Launch the independent copy when ready:
+Launch the independent copy from the **Codex Subscription Router** Start menu
+shortcut. No PowerShell command is needed for everyday launching or queued updates.
 
-```powershell
-& "$env:LOCALAPPDATA\Programs\Codex Subscription Router\Launch-CodexSubscriptionRouter.ps1"
-```
+Wallpapers reuse `%LOCALAPPDATA%\CodexWallpapers\library.json` and its media;
+`CODEX_WALLPAPERS_DATA` can select another existing library. Preferences remain
+in the isolated desktop profile. The combined app uses verified loopback port
+9349, leaving a separate wallpaper installation's port 9348 and endpoint file
+alone. The wallpaper picker appears in Codex's profile menu. Wallpaper failure
+does not prevent routing or normal chat use. ChatGPT Web model/provider settings
+and routing are unchanged by this integration.
+
+Updates build a complete replacement before backing up the installed app. An
+unsupported official package or failed build leaves the previous copy available.
+Update errors are recorded in
+`%LOCALAPPDATA%\Codex Subscription Router\update-error.log`; the request stays
+queued for retry. The stable shortcut dispatcher is under that folder's
+`Launcher` directory. The first combined release still requires manual live
+validation after closing/reopening the staged app.
 
 The launcher uses an isolated Electron profile under
 `%LOCALAPPDATA%\Codex Subscription Router\User Data`. The Windows bootstrap also

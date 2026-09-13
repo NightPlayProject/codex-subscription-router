@@ -61,7 +61,12 @@ def launcher_script(user_data: Path) -> str:
         f"$env:CODEX_MUX_HOME = {powershell_single_quoted(str(DEFAULT_STATE_ROOT))}\n"
         "$exe = Join-Path $PSScriptRoot 'app\\ChatGPT.exe'\n"
         "$userDataArg = '--user-data-dir=\"' + $userData + '\"'\n"
-        "Start-Process -FilePath $exe -ArgumentList $userDataArg -WorkingDirectory (Split-Path $exe -Parent)\n"
+        "$env:CODEX_ROUTER_INSTALL_ROOT = $PSScriptRoot\n"
+        "if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'Wallpapers.ps1')) {\n"
+        "  & (Join-Path $PSScriptRoot 'Wallpapers.ps1') -Executable $exe -UserDataArgument $userDataArg\n"
+        "} else {\n"
+        "  Start-Process -FilePath $exe -ArgumentList $userDataArg -WorkingDirectory (Split-Path $exe -Parent)\n"
+        "}\n"
     )
 
 
