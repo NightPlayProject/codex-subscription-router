@@ -47,7 +47,7 @@
   function updateDetails(){const item=items.get(prefs.selected);q('preview').hidden=!item;if(item){q('preview').src=item.thumbnail;q('current').textContent=item.title;q('dimensions').textContent=`${item.width} × ${item.height} · ${item.kind==='video'?'Video':'Image'}`;}else{q('current').textContent='No wallpaper selected';q('dimensions').textContent='';}for(const b of q('grid').children)b.setAttribute('aria-pressed',String(b.dataset.id===prefs.selected));}
   function updateFilter(){let visible=0;for(const b of q('grid').children){const i=items.get(b.dataset.id);b.hidden=!((filter==='all'||i.kind===filter)&&i.title.toLocaleLowerCase().includes(q('search').value.toLocaleLowerCase()));if(!b.hidden)visible++;}q('empty').hidden=items.size>0;q('no-results').hidden=visible>0||items.size===0;}
   async function select(id,{persist=true}={}){
-    const item=items.get(id);if(!item)throw Error('Wallpaper unavailable');const ticket=++seq;
+    const item=items.get(id);if(!item)throw Error('Wallpaper unavailable');if(current?.src===item.url){appearance();return true;}const ticket=++seq;
     const media=document.createElement(item.kind==='video'?'video':'img');media.id='cw-media';media.setAttribute('aria-hidden','true');
     if(item.kind==='video'){media.muted=true;media.defaultMuted=true;media.loop=true;media.playsInline=true;media.preload='auto';}
     try{
@@ -65,11 +65,12 @@
     if(!/^[a-f0-9]{24}$/.test(meta.id)||!['image','video'].includes(meta.kind)||typeof meta.title!=='string')throw Error('Invalid media');
     const parts=chunks.get(meta.id);if(!parts||parts.size!==meta.size)throw Error('Incomplete media transfer');
     chunks.delete(meta.id);const url=URL.createObjectURL(new Blob(parts.bytes,{type:meta.mime}));urls.add(url);
-    const thumbnail=URL.createObjectURL(new Blob([Uint8Array.from(atob(base64),c=>c.charCodeAt(0))],{type:'image/jpeg'}));urls.add(thumbnail);
+    const thumbnail=URL.createObjectURL(new Blob([decodeBytes(base64)],{type:'image/jpeg'}));urls.add(thumbnail);
     items.set(meta.id,{...meta,url,thumbnail});const b=document.createElement('button');b.dataset.id=meta.id;b.setAttribute('aria-pressed','false');
     const img=document.createElement('img');img.src=thumbnail;img.alt='';const title=document.createElement('strong');title.textContent=meta.title;const detail=document.createElement('small');detail.textContent=`${meta.kind==='video'?'Video':'Image'} · ${meta.width} × ${meta.height}`;b.append(img,title,detail);b.onclick=()=>select(meta.id).catch(()=>{});q('grid').append(b);updateFilter();
   }
-  function append(id,base64){let p=chunks.get(id);if(!p){p={size:0,bytes:[]};chunks.set(id,p);}const b=Uint8Array.from(atob(base64),c=>c.charCodeAt(0));p.size+=b.length;if(p.size>128*1024*1024)throw Error('Media too large');p.bytes.push(b);}
+  function decodeBytes(base64){const raw=atob(base64),bytes=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);return bytes;}
+  function append(id,base64){let p=chunks.get(id);if(!p){p={size:0,bytes:[]};chunks.set(id,p);}const b=decodeBytes(base64);p.size+=b.length;if(p.size>128*1024*1024)throw Error('Media too large');p.bytes.push(b);}
   const open=()=>{lastFocus=document.activeElement;if(!dialog.open)dialog.showModal();appearance();};
   const close=()=>dialog.close();q('close').onclick=close;dialog.addEventListener('close',()=>{if(lastFocus?.isConnected)lastFocus.focus();});
   q('help').onclick=q('empty-help').onclick=()=>{q('guide').hidden=!q('guide').hidden;};
@@ -100,10 +101,10 @@
     for(const [old,handler] of menuHandlers)if(!old.isConnected){old.removeEventListener('keydown',handler,true);menuHandlers.delete(old);}
     if(!menuHandlers.has(menu)){const handler=e=>{if(!['ArrowDown','ArrowUp','Home','End'].includes(e.key))return;const rows=[...menu.querySelectorAll('[role="menuitem"]')],i=rows.indexOf(document.activeElement);if(i<0)return;e.preventDefault();e.stopImmediatePropagation();rows[e.key==='Home'?0:e.key==='End'?rows.length-1:(i+(e.key==='ArrowDown'?1:-1)+rows.length)%rows.length].focus();};menuHandlers.set(menu,handler);menu.addEventListener('keydown',handler,true);}
   }
-  const observer=new MutationObserver(insertMenu);observer.observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['aria-labelledby','aria-controls','aria-expanded','aria-label']});insertMenu();
+  let menuFrame=0;const observer=new MutationObserver(()=>{if(!menuFrame)menuFrame=requestAnimationFrame(()=>{menuFrame=0;if(!disposed)insertMenu();});});observer.observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['aria-labelledby','aria-controls','aria-expanded','aria-label']});insertMenu();
   const visibility=()=>appearance();document.addEventListener('visibilitychange',visibility);reduced.addEventListener('change',visibility);
   const storage=e=>{if(e.key!==KEY)return;const next=readPrefs(),previous=prefs;prefs=next;if(items.has(next.selected)&&current?.src!==items.get(next.selected).url)select(next.selected,{persist:false}).catch(()=>{if(prefs===next){prefs=previous;appearance();updateDetails();}});else{appearance();updateDetails();}};window.addEventListener('storage',storage);
-  function dispose(){disposed=true;seq++;window.__CW_USAGE__?.dispose();observer.disconnect();for(const [menu,handler] of menuHandlers)menu.removeEventListener('keydown',handler,true);menuHandlers.clear();document.removeEventListener('visibilitychange',visibility);reduced.removeEventListener('change',visibility);window.removeEventListener('storage',storage);current?.pause?.();current?.remove();host.remove();surface.remove();document.documentElement.classList.remove('cw-active');document.querySelectorAll('[data-cw-menu]').forEach(e=>e.remove());for(const url of urls)URL.revokeObjectURL(url);items.clear();chunks.clear();delete window.__CODEX_WALLPAPERS_PUBLIC__;}
+  function dispose(){disposed=true;seq++;window.__CW_USAGE__?.dispose();observer.disconnect();cancelAnimationFrame(menuFrame);for(const [menu,handler] of menuHandlers)menu.removeEventListener('keydown',handler,true);menuHandlers.clear();document.removeEventListener('visibilitychange',visibility);reduced.removeEventListener('change',visibility);window.removeEventListener('storage',storage);current?.pause?.();current?.remove();host.remove();surface.remove();document.documentElement.classList.remove('cw-active');document.querySelectorAll('[data-cw-menu]').forEach(e=>e.remove());for(const url of urls)URL.revokeObjectURL(url);items.clear();chunks.clear();delete window.__CODEX_WALLPAPERS_PUBLIC__;}
   const api={append,register,select,open,close,dispose,ids:()=>[...items.keys()],status:()=>({count:items.size,selected:prefs.selected,enabled:prefs.enabled,media:!!current,profileButton:!!document.querySelector('[data-cw-menu]'),settings:{...prefs}}),async ready(){renderControls();updateFilter();if(items.has(prefs.selected))await select(prefs.selected);else{notice(items.size?'Choose your first wallpaper.':'Your library is empty. Add your first wallpaper with your agent.');}return api.status();}};
   window.__CODEX_WALLPAPERS_PUBLIC__=api;renderControls();return 'installed';
 })

@@ -31,7 +31,7 @@ async function setup() {
   const context = {
     document: { addEventListener: (name, handler) => { state[name] = handler; }, body, head: new Element('head'), readyState: 'complete', getElementById: () => null, createElement: tag => new Element(tag) },
     window: {}, Intl, URL,
-    setInterval: callback => { state.poll = callback; },
+    setInterval: (callback, delay) => { if (delay === 1000) state.poll = callback; else state.updatePoll = callback; },
     fetch: async (url, options) => {
       const route = url.split('/v1')[1];
       state.calls.push([route, options.method]);
@@ -47,7 +47,7 @@ async function setup() {
       } else if (route === '/accounts') result = { accounts: state.accounts };
       else if (route === '/routing-preference') {
         if (options.body) state.accountId = JSON.parse(options.body).accountId;
-        result = { accountId: state.accountId || '', preparation: state.preparation || {} };
+        result = { accountId: state.accountId || '', preparation: JSON.parse(JSON.stringify(state.preparation || {})) };
       }
       else if (route === '/accounts/primary' && options.method === 'PATCH') {
         if (state.failRename) return {ok:false,json:async()=>({error:'Rename failed'})};
@@ -199,3 +199,19 @@ test('dropdown selection commits while background render is pending', async () =
   assert.equal(ui.state.accountId, 'primary');
   assert(!ui.all().includes(select));
 });
+
+ test('unchanged readiness polling preserves panel nodes and expanded details', async () => {
+  const ui = await setup();
+  const panel = ui.all().find(item => item.className?.includes('cmx-panel'));
+  panel.className = 'cmx-panel';
+  const before = [...panel.children];
+  await ui.state.poll();
+  assert.deepEqual(panel.children, before);
+  assert.equal(panel.children[0], before[0]);
+ });
+ test('background update check detects a new revision without reopening', async () => {
+  const ui = await setup();
+  ui.state.update = {supported:true,available:true};
+  ui.state.updatePoll(); await settle();
+  assert(ui.button('Update on next launch'));
+ });

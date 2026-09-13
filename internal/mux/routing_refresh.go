@@ -98,7 +98,7 @@ func (m *Multiplexer) PrepareExistingChats(accountID string) {
 							ctx, cancel := context.WithTimeout(context.Background(), 2*requestTimeout)
 							err = m.moveThreadToAccount(ctx, id, owner, accountID)
 							cancel()
-							if errors.Is(err, errChatActive) {
+							if errors.Is(err, errChatActive) || errors.Is(err, errThreadUnloading) {
 								err = nil
 								deferred = true
 							}

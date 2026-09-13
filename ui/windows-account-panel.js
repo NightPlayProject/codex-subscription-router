@@ -586,13 +586,24 @@
         if (login) await refresh();
         else {
           const routing = await request("/routing-preference");
-          preparation = routing.preparation || {};
-          preferredNewThreadAccountId = routing.accountId || "";
-          render();
+          const nextPreparation = routing.preparation || {};
+          const nextAccountId = routing.accountId || "";
+          if (JSON.stringify(preparation) !== JSON.stringify(nextPreparation) || preferredNewThreadAccountId !== nextAccountId) {
+            preparation = nextPreparation;
+            preferredNewThreadAccountId = nextAccountId;
+            render();
+          }
         }
       } catch { /* Preserve the current view during transient network failures. */ }
       finally { refreshing = false; }
     }, 1000);
+
+    // Keep update detection current while the app stays open. Previously the
+    // update status could appear stale until the panel was reopened because
+    // checks only happened when the launcher was clicked or after an hour.
+    setInterval(() => {
+      if (!updateBusy) checkUpdates();
+    }, 5 * 60 * 1000);
 
     try {
       await refresh();

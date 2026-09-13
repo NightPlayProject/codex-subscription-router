@@ -63,8 +63,7 @@ async function run(){
     do{
       let list;
       try{list=await targets(endpoint);failures=0;}catch(e){if(!watch||++failures>=3)throw e;await new Promise(r=>setTimeout(r,2000));continue;}
-      const library=await readLibrary();
-      if(library.items.reduce((n,i)=>n+i.size,0)>512*1024*1024)throw Error('Library exceeds 512 MiB; reduce it before loading all windows.');
+      let library; // Read and validate media only when a document needs installation.
       for(const id of seen.keys())if(!list.some(t=>t.id===id))seen.delete(id);
       for(const t of list){
         const s=new Session(t.webSocketDebuggerUrl);try{
@@ -74,6 +73,10 @@ async function run(){
           const generation=String(probe.time);
           if(watch&&seen.get(t.id)===generation)continue;
           seen.set(t.id,generation); // One attempt per document, no retry loops.
+          if(!library){
+            library=await readLibrary();
+            if(library.items.reduce((n,i)=>n+i.size,0)>512*1024*1024)throw Error('Library exceeds 512 MiB; reduce it before loading all windows.');
+          }
           const status=await applyWindow(s,library,root,code);
           await writeStatus({state:'ready',target:t.id,...status});first=false;
         }catch(e){await writeStatus({state:'window-failed',target:t.id,error:e.message});if(!watch)throw e;}

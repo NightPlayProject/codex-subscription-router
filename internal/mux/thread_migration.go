@@ -18,6 +18,8 @@ import (
 
 const sessionMetadataReadLimit = 16 << 20
 
+var errThreadUnloading = errors.New("target chat is still releasing its history; retry shortly")
+
 var errChatActive = errors.New("chat is still running; subscription changes apply after the reply finishes")
 
 const (
@@ -260,6 +262,7 @@ func attachIdleThread(ctx context.Context, child appServerRequester, threadID st
 
 func waitForThreadUnloaded(ctx context.Context, child appServerRequester, threadID string) error {
 	deadline := time.Now().Add(threadUnloadWaitLimit)
+	interval := threadUnloadPollInterval
 	for {
 		loaded, err := loadedThreadIDs(ctx, child)
 		if err != nil {
@@ -269,9 +272,9 @@ func waitForThreadUnloaded(ctx context.Context, child appServerRequester, thread
 			return nil
 		}
 		if !time.Now().Before(deadline) {
-			return errors.New("chat remained loaded after unsubscribe")
+			return errThreadUnloading
 		}
-		timer := time.NewTimer(threadUnloadPollInterval)
+		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
@@ -279,6 +282,9 @@ func waitForThreadUnloaded(ctx context.Context, child appServerRequester, thread
 			}
 			return ctx.Err()
 		case <-timer.C:
+		}
+		if interval < 400*time.Millisecond {
+			interval *= 2
 		}
 	}
 }
