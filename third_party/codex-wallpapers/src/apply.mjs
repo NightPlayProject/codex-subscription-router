@@ -56,7 +56,7 @@ async function run(){
   const endpoint=JSON.parse((await fs.readFile(endpointFile,'utf8')).replace(/^\uFEFF/,''));
   await verifyOwner(endpoint);
   let lock;
-  if(watch){try{lock=await fs.open(path.join(root,`watch-${endpoint.browserId}.lock`),'wx');}catch(e){if(e.code==='EEXIST'){console.log('Window listener already started for this browser.');return;}throw e;}}
+  if(watch){try{lock=await fs.open(path.join(root,`watch-${endpoint.browserId}.lock`),'wx');await lock.writeFile(String(process.pid));}catch(e){if(e.code==='EEXIST'){console.log('Window listener already started for this browser.');return;}throw e;}}
   const seen=new Map(),code=await payload();let failures=0,first=true;
   const writeStatus=async value=>atomicJSON(path.join(root,'status.json'),{time:new Date().toISOString(),...value});
   try {

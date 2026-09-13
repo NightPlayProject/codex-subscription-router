@@ -26,13 +26,19 @@ do {
         $version = Invoke-RestMethod 'http://127.0.0.1:9349/json/version' -TimeoutSec 2 -MaximumRedirection 0
         $endpoint = @{ port = 9349; browserId = ([Uri]$version.webSocketDebuggerUrl).Segments[-1] }
         Test-RouterEndpoint $endpoint $Executable
-        $watchers = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction Stop | Where-Object {
-            $_.CommandLine -and $_.CommandLine.Contains($apply) -and $_.CommandLine.Contains('--watch')
-        })
-        if ($watchers.Count) { return }
+        $watchLock = Join-Path $data "watch-$($endpoint.browserId).lock"
+        if (Test-Path -LiteralPath $watchLock) {
+            $watchPid = Get-Content -LiteralPath $watchLock -Raw
+            if ($watchPid -match '^\d+$') {
+                $watcher = Get-CimInstance Win32_Process -Filter "ProcessId=$watchPid" -ErrorAction Stop
+                if ($watcher -and $watcher.CommandLine -and $watcher.CommandLine.Contains($apply) -and $watcher.CommandLine.Contains('--watch')) { return }
+            }
+            # A verified browser's lock is stale if its recorded listener exited.
+            Remove-Item -LiteralPath $watchLock
+        }
         $endpoint | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $data 'router-endpoint.json') -Encoding UTF8
         $env:CODEX_WALLPAPERS_ENDPOINT = 'router-endpoint.json'
-        Start-Process -FilePath $node.Source -ArgumentList ('"' + $apply + '" --watch') -WindowStyle Hidden -RedirectStandardOutput (Join-Path $data 'router-listener.log') -RedirectStandardError (Join-Path $data 'router-listener-error.log')
+        Start-Process -FilePath $node.Source -ArgumentList ('"' + $apply + '" --watch') -WindowStyle Hidden -RedirectStandardOutput (Join-Path $data "router-listener-$($endpoint.browserId).log") -RedirectStandardError (Join-Path $data "router-listener-$($endpoint.browserId)-error.log")
         return
     } catch { Start-Sleep -Milliseconds 400 }
 } while ((Get-Date) -lt $deadline)
