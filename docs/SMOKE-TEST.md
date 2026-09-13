@@ -71,6 +71,13 @@ Run these checks only on the exact Windows package recorded in
   Automatic and confirm no migration occurs on the next turn.
 - Test Windows Computer Use independently. Do not infer Computer Use support
   from ASAR staging, mux health, or ordinary desktop launch alone.
+- Select a subscription with several existing chats. Verify preparation progress,
+  an idle chat, a reopened cold chat, and a chat with a running reply. Refresh the
+  list repeatedly and confirm owners do not revert or chats appear twice. Test
+  both directions before claiming live migration success.
+- Rename an account inline, save it, refresh, and verify persistence. Verify
+  Cancel and an empty name, and confirm failed preparation is visible in the
+  subscription panel without claiming the affected chat is ready.
 
 Record the tested commit, Windows version, AppX package version, source ASAR
 hash, staged ASAR hash, GUI result, and Computer Use result for each release.

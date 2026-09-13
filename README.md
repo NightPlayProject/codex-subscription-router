@@ -269,12 +269,19 @@ starts another sign-in.
 | Account disabled | Excluded from routing and pooled usable quota |
 
 The subscription assigned to the current thread appears in its pinned summary.
-On Windows, the subscription panel also includes **Codex chats use** with
+On Windows, the subscription panel includes **Subscription for all chats** with
 **Automatic** plus each enabled subscription. **Automatic** keeps existing
-threads on their persisted owner. Selecting a subscription also applies to an
-existing chat the next time you send a message: the router reads that chat's
-resumable history, resumes it on the selected subscription, and only then
-updates the persisted owner. An unavailable or depleted selected subscription
+threads on their persisted owner. Selecting a subscription immediately updates
+the global preference and prepares open, idle chats in the background. The panel
+shows progress and any preparation failures. Closed chats switch when reopened;
+running replies keep their current account and switch on a later turn. Every
+existing chat follows this preference, not just the current chat. Preparation
+can take time to flush tools and copy history; it is not an instant bulk transfer.
+The router persists a new owner only after successfully resuming the history.
+Refreshing the chat list cannot replace that owner with an older retained copy.
+Use **Rename** to edit a subscription name inline, then **Save name** or **Cancel**.
+ChatGPT Web models continue using the account signed in to the Web bridge.
+An unavailable or depleted selected subscription
 safely keeps the current owner; normal quota failover still applies if that
 owner is also depleted.
 

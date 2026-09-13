@@ -31,7 +31,12 @@ threads at the next `turn/start`. The multiplexer reads the thread from its
 current owner, resumes the same history on the selected account, persists the
 new owner only after resume succeeds, and then forwards the turn. `Automatic`
 leaves existing sticky ownership unchanged. Passive thread reads and lists do
-not trigger migration.
+not trigger migration. Explicit selection also schedules preparation of every
+known idle, open chat. Cold chats prepare on `thread/resume`; active chats defer
+until a subsequent turn. Progress is exposed by the routing-preference endpoint.
+Per-thread routing locks serialize preparation with desktop requests. Internal
+migration lifecycle notifications are suppressed, and passive discovery only
+learns unknown owners so retained source rollouts cannot undo a migration.
 
 If the owner is depleted, the multiplexer resumes the rollout on an account
 with capacity and updates ownership. Threads do not migrate for ordinary load

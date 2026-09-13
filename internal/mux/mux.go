@@ -77,6 +77,11 @@ type Multiplexer struct {
 
 	threadRouteMu    sync.Mutex
 	threadRouteLocks map[string]*sync.Mutex
+	migrationMu      sync.RWMutex
+	migrating        map[string]bool
+	batchMu          sync.Mutex
+	batchStatus      RoutingStatus
+	batchGeneration  uint64
 
 	profileMu     sync.Mutex
 	profileClient *http.Client
@@ -149,6 +154,9 @@ func (m *Multiplexer) syncManagedConfigLoop(ctx context.Context) {
 }
 
 func (m *Multiplexer) Close() {
+	m.batchMu.Lock()
+	m.batchGeneration++
+	m.batchMu.Unlock()
 	for _, entry := range m.childEntries() {
 		_ = entry.child.Close()
 	}
@@ -275,6 +283,52 @@ func (m *Multiplexer) routeExistingRequest(message protocol.Message) {
 		go m.routeTurnStart(message, threadID, accountID)
 		return
 	}
+	if threadID != "" {
+		go func() {
+			unlock := m.lockThreadRoute(threadID)
+			defer unlock()
+			if owner, ok := m.store.ThreadOwner(threadID); ok {
+				accountID = owner
+			}
+			if message.Method == "thread/resume" {
+				if preferred, ok := m.preferredThreadAccount(accountID); ok {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*requestTimeout)
+					err := m.moveThreadToAccount(ctx, threadID, accountID, preferred.ID)
+					cancel()
+					if err != nil && !errors.Is(err, errChatActive) {
+						m.write(protocol.Failure(message.ID, -32027, fmt.Sprintf("prepare chat for %s: %v", preferred.Label, err)))
+						return
+					}
+					if err == nil {
+						accountID = preferred.ID
+					}
+					// The UI's old path belongs to the previous account. The
+					// migration already resumed a validated target-local path.
+					var params map[string]json.RawMessage
+					if json.Unmarshal(message.Params, &params) == nil {
+						delete(params, "path")
+						delete(params, "history")
+						message.Params, _ = json.Marshal(params)
+					}
+				}
+				var params map[string]json.RawMessage
+				if json.Unmarshal(message.Params, &params) == nil {
+					var path string
+					_ = json.Unmarshal(params["path"], &path)
+					if account, ok := m.store.Account(accountID); ok && path != "" {
+						if _, err := relativePathInside(account.CodexHome, path); err != nil {
+							delete(params, "path")
+							message.Params, _ = json.Marshal(params)
+						}
+					}
+				}
+			}
+			if err := m.forward(accountID, message); err != nil {
+				m.write(protocol.Failure(message.ID, -32023, err.Error()))
+			}
+		}()
+		return
+	}
 	if err := m.forward(accountID, message); err != nil {
 		m.write(protocol.Failure(message.ID, -32023, err.Error()))
 	}
@@ -338,6 +392,12 @@ func (m *Multiplexer) routeTurnStart(message protocol.Message, threadID, ownerID
 		snapshot, err := m.accountSnapshotWithProfile(ctx, preferred.ID, false)
 		if err == nil && accountHasCapacity(snapshot) {
 			if err := m.moveThreadToAccount(ctx, threadID, ownerID, preferred.ID); err != nil {
+				if errors.Is(err, errChatActive) {
+					if err := m.forward(ownerID, message); err != nil {
+						m.write(protocol.Failure(message.ID, -32023, err.Error()))
+					}
+					return
+				}
 				m.write(protocol.Failure(message.ID, -32027, fmt.Sprintf("move chat to %s: %v", preferred.Label, err)))
 				return
 			}
@@ -385,6 +445,9 @@ func (m *Multiplexer) preferredThreadAccount(ownerID string) (state.Account, boo
 
 func (m *Multiplexer) lockThreadRoute(threadID string) func() {
 	m.threadRouteMu.Lock()
+	if m.threadRouteLocks == nil {
+		m.threadRouteLocks = make(map[string]*sync.Mutex)
+	}
 	lock := m.threadRouteLocks[threadID]
 	if lock == nil {
 		lock = &sync.Mutex{}
@@ -447,6 +510,13 @@ func (m *Multiplexer) moveThreadToAccountWithResume(
 }
 
 func (m *Multiplexer) resumeThreadOnAccount(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
+	m.migrationMu.Lock()
+	if m.migrating == nil {
+		m.migrating = make(map[string]bool)
+	}
+	m.migrating[threadID] = true
+	m.migrationMu.Unlock()
+	defer func() { m.migrationMu.Lock(); delete(m.migrating, threadID); m.migrationMu.Unlock() }()
 	sourceAccount, ok := m.store.Account(sourceAccountID)
 	if !ok {
 		return fmt.Errorf("source subscription metadata is unavailable")
@@ -506,6 +576,15 @@ func (m *Multiplexer) inboundLoop(ctx context.Context) {
 
 func (m *Multiplexer) handleInbound(inbound backend.Inbound) {
 	message := inbound.Message
+	if len(message.ID) == 0 && strings.HasPrefix(message.Method, "thread/") {
+		id := threadIDFromNotification(message.Params)
+		m.migrationMu.RLock()
+		internal := m.migrating[id]
+		m.migrationMu.RUnlock()
+		if internal {
+			return
+		}
+	}
 	if message.Method == "" && len(message.ID) > 0 {
 		key := protocol.RequestIDKey(message.ID)
 		m.externalMu.Lock()
@@ -534,7 +613,7 @@ func (m *Multiplexer) handleInbound(inbound backend.Inbound) {
 	}
 	if message.Method == "thread/started" {
 		if threadID := threadIDFromNotification(message.Params); threadID != "" {
-			_ = m.store.SetThreadOwner(threadID, inbound.AccountID)
+			_ = m.store.LearnThreadOwner(threadID, inbound.AccountID)
 		}
 	}
 	if message.Method == "turn/completed" ||
@@ -611,7 +690,7 @@ func (m *Multiplexer) learnThreadOwner(route externalRoute, accountID string, re
 	switch route.method {
 	case "thread/start", "thread/fork", "thread/resume", "thread/unarchive":
 		if threadID := threadIDFromResult(result); threadID != "" {
-			_ = m.store.SetThreadOwner(threadID, accountID)
+			_ = m.store.LearnThreadOwner(threadID, accountID)
 		}
 	}
 }
@@ -765,6 +844,9 @@ func threadIDFromResult(result json.RawMessage) string {
 }
 
 func threadIDFromNotification(params json.RawMessage) string {
+	if id := threadIDFromParams(params); id != "" {
+		return id
+	}
 	return threadIDFromResult(params)
 }
 

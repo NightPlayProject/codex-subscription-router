@@ -227,6 +227,31 @@ func (s *Store) ThreadOwner(threadID string) (string, bool) {
 	return owner, ok
 }
 
+func (s *Store) ThreadOwners() map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	owners := make(map[string]string, len(s.owners))
+	for id, owner := range s.owners {
+		owners[id] = owner
+	}
+	return owners
+}
+
+// LearnThreadOwner never replaces an explicit migration assignment with a stale
+// disk copy discovered by thread/list or an in-flight resume notification.
+func (s *Store) LearnThreadOwner(threadID, accountID string) error {
+	if threadID == "" || accountID == "" {
+		return errors.New("thread and account IDs are required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.owners[threadID]; exists {
+		return nil
+	}
+	s.owners[threadID] = accountID
+	return s.saveLocked()
+}
+
 func (s *Store) PreferredNewThreadAccountID() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

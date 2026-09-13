@@ -18,9 +18,12 @@ import (
 
 const sessionMetadataReadLimit = 16 << 20
 
+var errChatActive = errors.New("chat is still running; subscription changes apply after the reply finishes")
+
 const (
 	threadUnloadPollInterval = 25 * time.Millisecond
-	threadUnloadWaitLimit    = 2 * time.Second
+	// Shutdown includes draining tools and flushing history, beyond the idle delay.
+	threadUnloadWaitLimit = 15 * time.Second
 )
 
 type appServerRequester interface {
@@ -46,13 +49,19 @@ func resumeThreadBetweenAccounts(
 			Path          string `json:"path"`
 			CWD           string `json:"cwd"`
 			ModelProvider string `json:"modelProvider"`
+			Status        struct {
+				Type string `json:"type"`
+			} `json:"status"`
 		} `json:"thread"`
 	}
 	if err := json.Unmarshal(readResponse.Result, &readResult); err != nil {
 		return fmt.Errorf("decode existing chat: %w", err)
 	}
-	if readResult.Thread.ID == "" || readResult.Thread.Path == "" {
+	if readResult.Thread.ID != threadID || readResult.Thread.Path == "" {
 		return errors.New("existing chat has no resumable history path")
+	}
+	if readResult.Thread.Status.Type == "active" {
+		return errChatActive
 	}
 	if err := ensureThreadUnloaded(ctx, target, threadID); err != nil {
 		return fmt.Errorf("prepare target chat: %w", err)

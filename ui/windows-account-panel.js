@@ -115,6 +115,8 @@
     let login = null;
     let refreshing = false;
     let error = "";
+	let editing = null;
+	let preparation = {};
 	let preferredNewThreadAccountId = "";
 
     async function refresh() {
@@ -125,6 +127,7 @@
 	  accounts = result.accounts || [];
 	  if (login && (!accounts.some(a => a.id === login.accountId) || accounts.some(a => a.id === login.accountId && a.connected))) login = null;
 	  preferredNewThreadAccountId = routing.accountId || "";
+	  preparation = routing.preparation || {};
       const current = globalThis.__codexMuxPluginAccountId;
       if (!current || !accounts.some((account) => account.id === current && account.enabled && account.connected)) {
         globalThis.__codexMuxPluginAccountId = accounts.find(a => a.id === preferredNewThreadAccountId && a.enabled && a.connected)?.id || accounts.find((account) => account.enabled && account.connected)?.id || null;
@@ -163,7 +166,7 @@
       const status = document.createElement("div");
       status.className = "cmx-muted";
       const connected = accounts.filter((account) => account.connected && account.enabled).length;
-      status.textContent = `${connected} connected · ${accounts.length} total`;
+      status.textContent = `${connected} of ${accounts.length} subscriptions connected`;
       if (busy) status.textContent = "Updating subscriptions…";
       titleWrap.append(title, status);
       const refreshButton = createButton("Refresh");
@@ -234,14 +237,36 @@
         const rename = createButton("Rename");
         rename.disabled = busy;
         rename.addEventListener("click", () => {
-          const next = window.prompt("Subscription name", account.label || "");
-          if (next == null || next.trim() === "") return;
-          run(async () => {
-            await request(`/accounts/${encodeURIComponent(account.id)}`, { method: "PATCH", body: JSON.stringify({ label: next.trim() }) });
-            await refresh();
-          });
+          editing = { id: account.id, value: account.label || "" };
+          render();
+          const input = panel.querySelector("input[aria-label='Subscription name']");
+          input?.focus(); input?.select();
         });
         actions.appendChild(rename);
+		if (editing?.id === account.id) {
+		  const form = document.createElement("form");
+		  const input = document.createElement("input");
+		  input.className = "cmx-select";
+		  input.setAttribute("aria-label", "Subscription name");
+		  input.value = editing.value;
+		  input.required = true; input.maxLength = 80; input.disabled = busy;
+		  input.addEventListener("input", () => { editing.value = input.value; });
+		  const save = createButton("Save name"); save.type = "submit"; save.disabled = busy;
+		  const cancel = createButton("Cancel"); cancel.disabled = busy;
+		  cancel.addEventListener("click", () => { editing = null; render(); });
+		  form.addEventListener("submit", (event) => {
+		    event.preventDefault();
+		    const label = input.value.trim();
+		    if (!label) { input.setCustomValidity("Enter a name."); input.reportValidity(); return; }
+		    run(async () => {
+		      await request(`/accounts/${encodeURIComponent(account.id)}`, { method: "PATCH", body: JSON.stringify({ label }) });
+		      editing = null;
+		      await refresh();
+		    });
+		  });
+		  input.addEventListener("input", () => input.setCustomValidity(""));
+		  form.append(input, save, cancel); details.appendChild(form);
+		}
 
         if (!account.controller) {
           const enabled = createButton(account.enabled ? "Disable" : "Enable");
@@ -284,11 +309,11 @@
 	  const routingLabel = document.createElement("div");
 	  routingLabel.className = "cmx-muted";
 	  routingLabel.style.marginTop = "10px";
-	  routingLabel.textContent = "Chat subscription";
+	  routingLabel.textContent = "Subscription for all chats";
 	  const routingSelect = document.createElement("select");
 	  routingSelect.className = "cmx-select";
 	  routingSelect.disabled = busy;
-	  routingSelect.setAttribute("aria-label", "Chat subscription");
+	  routingSelect.setAttribute("aria-label", "Subscription for all chats");
 	  const automatic = document.createElement("option");
 	  automatic.value = "";
 	  automatic.textContent = "Automatic";
@@ -308,18 +333,32 @@
 		});
 		preferredNewThreadAccountId = updated.accountId || "";
 		globalThis.__codexMuxPluginAccountId = preferredNewThreadAccountId || accounts.find(a => a.controller && a.connected)?.id || null;
+		await refresh();
 	  }));
 	  panel.append(routingLabel, routingSelect);
 	  const routingHelp = document.createElement("div");
 	  routingHelp.className = "cmx-muted";
 	  routingHelp.style.marginTop = "6px";
-	  routingHelp.textContent = "Applies to new chats and the next message in existing chats. Also selects the subscription for plugins and MCP.";
+	  routingHelp.textContent = "Applies to every new and existing chat. Running replies finish first. ChatGPT Web models use the account signed in to ChatGPT Web.";
 	  panel.appendChild(routingHelp);
+	  if (preparation.total) {
+	    const progress = document.createElement("div"); progress.className = "cmx-muted";
+	    progress.setAttribute("role", "status");
+	    progress.textContent = preparation.running
+	      ? `Updating existing chats… ${preparation.ready || 0} of ${preparation.total} ready`
+	      : `${preparation.ready || 0} chats ready${preparation.deferred ? ` · ${preparation.deferred} switch when reopened or after their reply` : ""}`;
+	    panel.appendChild(progress);
+	    if (preparation.failed) {
+	      const failure = document.createElement("div"); failure.className = "cmx-error";
+	      failure.textContent = `${preparation.failed} chats could not switch. ${preparation.error || "Try selecting the subscription again."}`;
+	      panel.appendChild(failure);
+	    }
+	  }
 
       const pluginLabel = document.createElement("div");
       pluginLabel.className = "cmx-muted";
       pluginLabel.style.marginTop = "10px";
-      pluginLabel.textContent = "Plugins / MCP subscription";
+      pluginLabel.textContent = "Subscription for plugins and connectors";
       const pluginSelect = document.createElement("select");
       pluginSelect.className = "cmx-select";
       pluginSelect.disabled = busy;
@@ -388,7 +427,7 @@
       if (event.key === "Escape") { panel.classList.add("cmx-hidden"); launch.setAttribute("aria-expanded", "false"); launch.focus(); }
     });
     setInterval(async () => {
-      if (!login || busy || refreshing) return;
+      if ((!login && !preparation.running) || busy || refreshing || editing) return;
       refreshing = true;
       try { await refresh(); } catch { /* Preserve the sign-in card during transient network failures. */ }
       finally { refreshing = false; }

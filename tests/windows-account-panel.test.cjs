@@ -12,6 +12,10 @@ class Element {
   addEventListener(name, handler) { this.events[name] = handler; }
   setAttribute(name, value) { this.attributes[name] = value; }
   focus() {}
+  setCustomValidity() {}
+  reportValidity() {}
+  select() {}
+  querySelector() { return undefined; }
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
 async function setup() {
@@ -30,7 +34,14 @@ async function setup() {
         const account = { id: 'new-account', label: 'Work', enabled: true, connected: false, threadCount: 0 };
         state.accounts.push(account); result = { account };
       } else if (route === '/accounts') result = { accounts: state.accounts };
-      else if (route === '/routing-preference') result = options.body ? JSON.parse(options.body) : { accountId: '' };
+      else if (route === '/routing-preference') {
+        if (options.body) state.accountId = JSON.parse(options.body).accountId;
+        result = { accountId: state.accountId || '', preparation: state.preparation || {} };
+      }
+      else if (route === '/accounts/primary' && options.method === 'PATCH') {
+        if (state.failRename) return {ok:false,json:async()=>({error:'Rename failed'})};
+        state.accounts[0].label = JSON.parse(options.body).label;
+      }
       else if (route.endsWith('/login')) result = { login: { userCode: 'TEST-CODE' } };
       else if (route.endsWith('/remove')) state.accounts = state.accounts.filter(a => a.id !== 'new-account');
       return { ok: true, json: async () => result };
@@ -56,7 +67,7 @@ test('chat selection also selects the plugin account after server success', asyn
   const ui = await setup();
   ui.button('Add subscription').events.click(); await settle();
   ui.state.accounts[1].connected = true; await ui.state.poll();
-  const select = ui.all().find(item => item.attributes['aria-label'] === 'Chat subscription');
+  const select = ui.all().find(item => item.attributes['aria-label'] === 'Subscription for all chats');
   select.value = 'new-account'; select.events.change(); await settle();
   assert.equal(ui.context.__codexMuxPluginAccountId, 'new-account');
   assert(ui.state.calls.some(([route, method]) => route === '/routing-preference' && method === 'PUT'));
@@ -65,7 +76,7 @@ test('chat selection also selects the plugin account after server success', asyn
 test('failed subscription refresh keeps previous plugin selection and shows the error', async () => {
   const ui = await setup();
   ui.state.failRouting = true;
-  const select = ui.all().find(item => item.attributes['aria-label'] === 'Chat subscription');
+  const select = ui.all().find(item => item.attributes['aria-label'] === 'Subscription for all chats');
   select.value = 'new-account'; select.events.change(); await settle();
   assert.equal(ui.context.__codexMuxPluginAccountId, 'primary');
   assert(ui.all().some(item => item.textContent === 'Refresh failed'));
@@ -78,4 +89,28 @@ test('signed-out account can be removed and pending code clears', async () => {
   ui.button('Remove').events.click(); await settle();
   assert.equal(ui.state.accounts.length, 1);
   assert(!ui.all().some(item => item.textContent === 'TEST-CODE'));
+});
+
+test('inline rename saves without a browser prompt and cancel keeps the name', async () => {
+  const ui = await setup();
+  ui.button('Rename').events.click();
+  let input = ui.all().find(item => item.tag === 'input');
+  input.value = 'Work Plus'; input.events.input();
+  ui.all().find(item => item.tag === 'form').events.submit({preventDefault(){}});
+  await settle();
+  assert.equal(ui.state.accounts[0].label, 'Work Plus');
+  assert(!ui.all().some(item => item.tag === 'form'));
+  ui.button('Rename').events.click();
+  ui.button('Cancel').events.click();
+  assert.equal(ui.state.accounts[0].label, 'Work Plus');
+});
+
+test('preparation progress refreshes and failures stay visible in the panel', async () => {
+  const ui = await setup();
+  ui.state.preparation = {running:true,total:3,ready:1};
+  ui.button('Refresh').events.click(); await settle();
+  assert(ui.all().some(item => item.textContent === 'Updating existing chats… 1 of 3 ready'));
+  ui.state.preparation = {running:false,total:3,ready:2,failed:1,error:'History unavailable'};
+  await ui.state.poll();
+  assert(ui.all().some(item => item.textContent?.includes('History unavailable')));
 });

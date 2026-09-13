@@ -193,7 +193,7 @@ func (s *Server) routingPreference(response http.ResponseWriter, request *http.R
 	}
 	switch request.Method {
 	case http.MethodGet:
-		writeJSON(response, http.StatusOK, map[string]any{"accountId": s.mux.PreferredNewThreadAccountID()})
+		writeJSON(response, http.StatusOK, map[string]any{"accountId": s.mux.PreferredNewThreadAccountID(), "preparation": s.mux.RoutingStatus()})
 	case http.MethodPut:
 		var input struct {
 			AccountID string `json:"accountId"`
@@ -212,6 +212,7 @@ func (s *Server) routingPreference(response http.ResponseWriter, request *http.R
 			writeJSON(response, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
+		s.mux.PrepareExistingChats(input.AccountID)
 		writeJSON(response, http.StatusOK, map[string]any{"accountId": s.mux.PreferredNewThreadAccountID()})
 	default:
 		methodNotAllowed(response)
