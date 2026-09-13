@@ -76,6 +76,20 @@
       .cmx-login{margin-top:10px;padding:10px;border-radius:10px;background:#2b2b2b}.cmx-code{font:600 20px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.06em;margin:6px 0}.cmx-select{width:100%;margin-top:8px;background:#2b2b2b;color:#fff;border:1px solid rgba(255,255,255,.16);border-radius:9px;padding:7px}
     `;
     style.textContent += `
+      #${ROOT_ID}{font-size:15px;line-height:1.45}
+      #${ROOT_ID} .cmx-panel{width:min(440px,calc(100vw - 32px));padding:18px;max-height:calc(100vh - 88px)}
+      #${ROOT_ID} .cmx-title{font-size:18px}
+      #${ROOT_ID} .cmx-name{font-size:18px;white-space:normal;overflow-wrap:anywhere}
+      #${ROOT_ID} .cmx-muted,#${ROOT_ID} .cmx-sub{font-size:13px}
+      #${ROOT_ID} .cmx-sub{letter-spacing:.12em;margin-top:5px}
+      #${ROOT_ID} .cmx-row{padding:16px 0}
+      #${ROOT_ID} .cmx-usage{gap:5px;margin-top:7px}
+      #${ROOT_ID} .cmx-usage-row{display:grid;grid-template-columns:52px auto minmax(0,1fr);font-size:15px;gap:10px}
+      #${ROOT_ID} .cmx-usage-reset{text-align:right;font-size:13px;color:#aaa}
+      #${ROOT_ID} .cmx-summary{padding:14px 0;border-top:1px solid #ffffff20}
+      #${ROOT_ID} .cmx-summary-title{font-size:18px;font-weight:600}
+      #${ROOT_ID} .cmx-total{display:flex;justify-content:space-between;gap:12px;margin-top:7px;font-size:16px}
+      #${ROOT_ID} .cmx-total strong{font-size:22px;font-variant-numeric:tabular-nums}
       #${ROOT_ID} .cmx-panel{transform-origin:bottom right;transition:opacity .16s ease,transform .16s ease,visibility .16s;opacity:1;transform:translateY(0) scale(1);scrollbar-gutter:stable}
       #${ROOT_ID} .cmx-panel.cmx-hidden{display:block;position:absolute;bottom:42px;right:0;opacity:0;visibility:hidden;pointer-events:none;transform:translateY(8px) scale(.98)}
       #${ROOT_ID} .cmx-row{grid-template-columns:minmax(0,1fr);gap:8px}
@@ -175,6 +189,34 @@
       head.append(titleWrap, refreshButton);
       panel.appendChild(head);
 
+      const summary = document.createElement("div");
+      summary.className = "cmx-summary";
+      const summaryTitle = document.createElement("div");
+      summaryTitle.className = "cmx-summary-title";
+      summaryTitle.textContent = "Total usage remaining";
+      summary.appendChild(summaryTitle);
+      for (const label of ["5h", "Weekly"]) {
+        const eligible = accounts.filter(account => account.connected && account.enabled);
+        const values = eligible.map(account => usageWindows(account).find(item => item.label === label))
+          .filter(Boolean).map(item => remainingPercent(item.window)).filter(value => value != null);
+        if (!values.length) continue;
+        const totalRow = document.createElement("div");
+        totalRow.className = "cmx-total";
+        const caption = document.createElement("span");
+        caption.textContent = `${label} · ${values.length} subscription${values.length === 1 ? "" : "s"}`;
+        const value = document.createElement("strong");
+        value.textContent = `${values.reduce((sum, remaining) => sum + remaining, 0).toFixed(0)}%`;
+        totalRow.append(caption, value);
+        summary.appendChild(totalRow);
+      }
+      const explanation = document.createElement("div");
+      explanation.className = "cmx-muted";
+      explanation.textContent = summary.children.length > 1
+        ? "Added across subscriptions; each keeps its own limits."
+        : "Usage unavailable";
+      summary.appendChild(explanation);
+      panel.appendChild(summary);
+
       if (error) {
         const errorBox = document.createElement("div");
         errorBox.className = "cmx-error";
@@ -228,7 +270,8 @@
         if (!account.enabled || account.email) {
           const meta = document.createElement("div");
           meta.className = "cmx-sub";
-          meta.textContent = `${account.enabled ? "" : "disabled"}${!account.enabled && account.email ? " · " : ""}${account.email || ""}`;
+          meta.textContent = `${account.enabled ? "" : "disabled"}${!account.enabled && account.email ? " · " : ""}${account.email ? "••••••••" : ""}`;
+          if (account.email) meta.setAttribute("aria-label", account.enabled ? "Email hidden" : "Disabled · Email hidden");
           details.appendChild(meta);
         }
 
@@ -423,6 +466,12 @@
       if (!panel.classList.contains("cmx-hidden")) run(refresh);
     });
     launch.setAttribute("aria-expanded", "false");
+    document.addEventListener("pointerdown", (event) => {
+      if (!root.contains(event.target)) {
+        panel.classList.add("cmx-hidden");
+        launch.setAttribute("aria-expanded", "false");
+      }
+    }, true);
     root.addEventListener("keydown", (event) => {
       if (event.key === "Escape") { panel.classList.add("cmx-hidden"); launch.setAttribute("aria-expanded", "false"); launch.focus(); }
     });

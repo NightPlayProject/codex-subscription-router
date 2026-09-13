@@ -16,13 +16,20 @@ class Element {
   reportValidity() {}
   select() {}
   querySelector() { return undefined; }
+  contains(target) { return this === target || this.children.some(child => child.contains(target)); }
+  get classList() {
+    return {
+      add: value => { this.className = [...new Set((this.className || '').split(' ').concat(value))].join(' '); },
+      contains: value => (this.className || '').split(' ').includes(value),
+    };
+  }
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
 async function setup() {
   const body = new Element('body');
   const state = { accounts: [{ id: 'primary', label: 'Primary', controller: true, connected: true, enabled: true }], calls: [] };
   const context = {
-    document: { body, head: new Element('head'), readyState: 'complete', getElementById: () => null, createElement: tag => new Element(tag) },
+    document: { addEventListener: (name, handler) => { state[name] = handler; }, body, head: new Element('head'), readyState: 'complete', getElementById: () => null, createElement: tag => new Element(tag) },
     window: {}, Intl, URL,
     setInterval: callback => { state.poll = callback; },
     fetch: async (url, options) => {
@@ -113,4 +120,26 @@ test('preparation progress refreshes and failures stay visible in the panel', as
   ui.state.preparation = {running:false,total:3,ready:2,failed:1,error:'History unavailable'};
   await ui.state.poll();
   assert(ui.all().some(item => item.textContent?.includes('History unavailable')));
+});
+
+test('totals separate windows, exclude disabled accounts, and mask emails', async () => {
+  const ui = await setup();
+  const account = (id, enabled, used) => ({id, enabled, connected:true, email:'private@example.com', rateLimits:{primary:{windowDurationMins:300,usedPercent:used},secondary:{windowDurationMins:10080,usedPercent:10}}});
+  ui.state.accounts = [account('one',true,40), account('two',true,20), account('disabled',false,0)];
+  ui.button('Refresh').events.click(); await settle();
+  assert(ui.all().some(item => item.textContent === '140%'));
+  assert(ui.all().some(item => item.textContent === '180%'));
+  assert(ui.all().some(item => item.textContent === '••••••••'));
+  assert(!ui.all().some(item => item.textContent?.includes('private@example.com')));
+});
+
+test('outside pointer closes panel while inside pointer leaves it open', async () => {
+  const ui = await setup();
+  const panel = ui.all().find(item => item.className === 'cmx-panel cmx-hidden');
+  panel.className = 'cmx-panel';
+  ui.state.pointerdown({target:ui.button('Refresh')});
+  assert.equal(panel.classList.contains('cmx-hidden'), false);
+  ui.state.pointerdown({target:ui.context.document.body});
+  assert.equal(panel.classList.contains('cmx-hidden'), true);
+  assert.equal(ui.button('Subscriptions').attributes['aria-expanded'], 'false');
 });
