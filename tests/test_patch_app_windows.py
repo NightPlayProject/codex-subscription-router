@@ -81,15 +81,18 @@ class WindowsPatcherTests(unittest.TestCase):
             build = extracted / ".vite" / "build"
             build.mkdir(parents=True)
             main = build / "main-test.js"
-            main.write_text("const window = new BrowserWindow({});", encoding="utf-8")
+            main.write_text("const window = new l.BrowserWindow({...this.options.windowIconPath==null?{}:{icon:this.options.windowIconPath}});", encoding="utf-8")
 
             patched = patcher.patch_window_icons(extracted)
             data = patched[0].read_text(encoding="utf-8")
             self.assertIn("chatgpt-app-dark.ico", data)
             self.assertIn("CODEX_SUBSCRIPTION_ROUTER_WINDOW_ICON", data)
 
-            main.write_text("const window = new BrowserWindow({});", encoding="utf-8")
-            self.assertEqual(patcher.patch_window_icons(extracted), [main])
+            with self.assertRaisesRegex(RuntimeError, "safe Electron BrowserWindow"):
+                patcher.patch_window_icons(extracted)
+            main.write_text("new l.BrowserWindow({});", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "safe Electron BrowserWindow"):
+                patcher.patch_window_icons(extracted)
 
     def test_renderer_patch_adds_loopback_and_scoped_bridge_once(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

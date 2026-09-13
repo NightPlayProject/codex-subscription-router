@@ -173,33 +173,20 @@ def patch_window_icons(extracted: Path) -> list[Path]:
     if not bundles:
         raise RuntimeError("could not find Electron main bundle for icon patch")
 
-    patched: list[Path] = []
-    icon_marker = "CODEX_SUBSCRIPTION_ROUTER_WINDOW_ICON"
-    for path in bundles:
-        data = path.read_text(encoding="utf-8")
-        if icon_marker in data:
-            patched.append(path)
-            continue
-        if "BrowserWindow" not in data:
-            continue
-
-        # Keep this conservative: only annotate bundles where a BrowserWindow
-        # options object is present. The runtime marker makes upgrades fail
-        # visibly instead of silently applying duplicate changes.
-        anchor = "new BrowserWindow({"
-        if data.count(anchor) != 1:
-            continue
-        data = data.replace(
-            anchor,
-            anchor + "icon: require('path').join(process.resourcesPath, 'chatgpt-app-dark.ico'), /* CODEX_SUBSCRIPTION_ROUTER_WINDOW_ICON */",
-            1,
-        )
-        path.write_text(data, encoding="utf-8")
-        patched.append(path)
-
-    if not patched:
+    if len(bundles) != 1:
+        raise RuntimeError("expected exactly one Electron main bundle")
+    path = bundles[0]
+    data = path.read_text(encoding="utf-8")
+    anchor = "...this.options.windowIconPath==null?{}:{icon:this.options.windowIconPath}"
+    if data.count(anchor) != 1:
         raise RuntimeError("could not find a safe Electron BrowserWindow icon anchor")
-    return patched
+    replacement = (
+        "icon:this.options.windowIconPath??require('node:path').join("
+        "process.resourcesPath,'chatgpt-app-dark.ico')"
+        "/* CODEX_SUBSCRIPTION_ROUTER_WINDOW_ICON */"
+    )
+    path.write_text(data.replace(anchor, replacement, 1), encoding="utf-8")
+    return [path]
 
 
 def patch_renderer(extracted: Path, token: str) -> Path:
