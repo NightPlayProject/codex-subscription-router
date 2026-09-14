@@ -296,8 +296,12 @@ func (m *Multiplexer) routeExistingRequest(message protocol.Message) {
 					err := m.moveThreadToAccount(ctx, threadID, accountID, preferred.ID)
 					cancel()
 					if err != nil && !errors.Is(err, errChatActive) {
-						m.write(protocol.Failure(message.ID, -32027, fmt.Sprintf("prepare chat for %s: %v", preferred.Label, err)))
-						return
+						m.publish(Event{
+							Type:      "routing-preference-unavailable",
+							AccountID: preferred.ID,
+							Message:   fmt.Sprintf("Could not move chat to %s; opening its current subscription: %v", preferred.Label, err),
+							Data:      map[string]any{"threadId": threadID, "currentAccountId": accountID},
+						})
 					}
 					if err == nil {
 						accountID = preferred.ID
