@@ -25,9 +25,13 @@ class Element {
   }
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
-async function setup(mainWorkspace = true) {
+async function setup(mainWorkspace = true, initialState = {}) {
   const body = new Element('body');
-  const state = { accounts: [{ id: 'primary', label: 'Primary', controller: true, connected: true, enabled: true }], calls: [] };
+  const state = {
+    accounts: [{ id: 'primary', label: 'Primary', controller: true, connected: true, enabled: true }],
+    calls: [],
+    ...initialState,
+  };
   const context = {
     document: { querySelector: () => mainWorkspace ? {} : null, addEventListener: (name, handler) => { state[name] = handler; }, body, head: new Element('head'), readyState: 'complete', getElementById: () => null, createElement: tag => new Element(tag) },
     window: {}, Intl, URL, setTimeout,
@@ -35,6 +39,15 @@ async function setup(mainWorkspace = true) {
     fetch: async (url, options) => {
       const route = url.split('/v1')[1];
       state.calls.push([route, options.method]);
+      const method = String(options.method || 'GET').toUpperCase();
+      if (method === 'GET' && state.getFailuresRemaining > 0) {
+        state.getFailuresRemaining -= 1;
+        throw new TypeError('Failed to fetch');
+      }
+      if (method !== 'GET' && state.failNextMutation) {
+        state.failNextMutation = false;
+        throw new TypeError('Failed to fetch');
+      }
       if (state.failRouting && route === '/routing-preference' && options.method === 'PUT') return { ok: false, json: async () => ({ error: 'Refresh failed' }) };
       let result = {};
       if (route === '/updates') {
@@ -64,6 +77,41 @@ async function setup(mainWorkspace = true) {
   const button = label => all().find(item => item.tag === 'button' && item.textContent === label);
   return { state, context, all, button };
 }
+
+test('cold start retries transient read failures and recovers without a stale error', async () => {
+  const ui = await setup(true, { getFailuresRemaining: 2 });
+  await new Promise(resolve => setTimeout(resolve, 250));
+  assert(ui.button('Subscriptions'));
+  assert(ui.state.calls.filter(([route]) => route === '/accounts' || route === '/routing-preference').length >= 4);
+  assert(!ui.all().some(item => item.textContent === 'Failed to fetch'));
+});
+
+test('mutation requests stay single-shot on network failure', async () => {
+  const ui = await setup();
+  const select = ui.all().find(item => item.attributes['aria-label'] === 'Subscription for all chats');
+  const before = ui.state.calls.filter(([route, method]) => route === '/routing-preference' && method === 'PUT').length;
+  ui.state.failNextMutation = true;
+  select.value = 'primary';
+  select.events.change();
+  await settle();
+  const after = ui.state.calls.filter(([route, method]) => route === '/routing-preference' && method === 'PUT').length;
+  assert.equal(after - before, 1);
+  assert(ui.all().some(item => item.textContent === 'Failed to fetch'));
+});
+
+test('successful refresh clears a previous connection or routing error', async () => {
+  const ui = await setup();
+  const select = ui.all().find(item => item.attributes['aria-label'] === 'Subscription for all chats');
+  ui.state.failRouting = true;
+  select.value = 'primary';
+  select.events.change();
+  await settle();
+  assert(ui.all().some(item => item.textContent === 'Refresh failed'));
+  ui.state.failRouting = false;
+  ui.button('Refresh').events.click();
+  await settle();
+  assert(!ui.all().some(item => item.textContent === 'Refresh failed'));
+});
 
 test('updates are checked independently and queued explicitly for next launch', async () => {
   const ui = await setup();

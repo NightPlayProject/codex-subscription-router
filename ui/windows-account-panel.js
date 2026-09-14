@@ -5,19 +5,38 @@
   const TOKEN = "__CODEX_MUX_CONTROL_TOKEN__";
   const STYLE_ID = "codex-mux-windows-style";
   const ROOT_ID = "codex-mux-windows-root";
+  const READ_RETRY_DELAYS_MS = [100, 200, 400, 700, 1200, 1800];
+
+  function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 
   async function request(path, options = {}) {
-    const response = await fetch(`${API}${path}`, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        "X-Codex-Mux-Token": TOKEN,
-        ...(options.headers || {}),
-      },
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
-    return body;
+    const method = String(options.method || "GET").toUpperCase();
+    let retryIndex = 0;
+
+    while (true) {
+      let response;
+      try {
+        response = await fetch(`${API}${path}`, {
+          ...options,
+          headers: {
+            "Content-Type": "application/json",
+            "X-Codex-Mux-Token": TOKEN,
+            ...(options.headers || {}),
+          },
+        });
+      } catch (caught) {
+        if (method !== "GET" || retryIndex >= READ_RETRY_DELAYS_MS.length) throw caught;
+        await wait(READ_RETRY_DELAYS_MS[retryIndex]);
+        retryIndex += 1;
+        continue;
+      }
+
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
+      return body;
+    }
   }
 
   function text(value) {
@@ -187,6 +206,7 @@
       if (!current || !accounts.some((account) => account.id === current && account.enabled && account.connected)) {
         globalThis.__codexMuxPluginAccountId = accounts.find(a => a.id === preferredNewThreadAccountId && a.enabled && a.connected)?.id || accounts.find((account) => account.enabled && account.connected)?.id || null;
       }
+      error = "";
       render();
     }
 
