@@ -420,3 +420,50 @@ func TestColdChatMigrationRecoversSavedHistory(t *testing.T) {
 		t.Fatal("cold chat not resumed")
 	}
 }
+
+func TestResumeCopiedThreadStalePathRecovery(t *testing.T) {
+	for _, scenario := range []string{"matching", "different", "loaded", "unrelated"} {
+		t.Run(scenario, func(t *testing.T) {
+			home := t.TempDir()
+			expected := filepath.Join(home, "sessions", "new.jsonl")
+			resumes := 0
+			child := &fakeRequester{request: func(method string, params json.RawMessage) (protocol.Message, error) {
+				if method == "thread/loaded/list" {
+					if scenario == "loaded" {
+						return protocol.Message{Result: json.RawMessage(`{"data":["chat"]}`)}, nil
+					}
+					return protocol.Message{Result: json.RawMessage(`{"data":[]}`)}, nil
+				}
+				resumes++
+				if resumes == 1 {
+					if scenario == "unrelated" {
+						return protocol.Message{}, errors.New("authentication failed")
+					}
+					return protocol.Message{}, errors.New("cannot resume paginated thread chat with stale path")
+				}
+				var decoded map[string]any
+				json.Unmarshal(params, &decoded)
+				if _, exists := decoded["path"]; exists {
+					t.Fatal("retry retained stale path")
+				}
+				if decoded["threadId"] != "chat" {
+					t.Fatal("retry changed thread ID")
+				}
+				resolved := expected
+				if scenario == "different" {
+					resolved = filepath.Join(home, "sessions", "old.jsonl")
+				}
+				result, _ := json.Marshal(map[string]any{"thread": map[string]any{"id": "chat", "path": resolved}})
+				return protocol.Message{Result: result}, nil
+			}}
+			params, _ := json.Marshal(map[string]any{"threadId": "chat", "path": expected, "excludeTurns": true})
+			err := resumeCopiedThread(context.Background(), child, "chat", home, expected, params)
+			if (err == nil) != (scenario == "matching") {
+				t.Fatalf("unexpected recovery result: %v", err)
+			}
+			if (scenario == "loaded" || scenario == "unrelated") && resumes != 1 {
+				t.Fatal("unsafe retry")
+			}
+		})
+	}
+}

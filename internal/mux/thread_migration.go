@@ -99,12 +99,62 @@ func resumeThreadBetweenAccounts(
 		"modelProvider": sourceModelProvider,
 		"excludeTurns":  true,
 	})
-	if _, err := target.Request(ctx, "thread/resume", resumeParams); err != nil {
+	if err := resumeCopiedThread(ctx, target, threadID, targetHome, targetPath, resumeParams); err != nil {
 		return fmt.Errorf("resume existing chat: %w", err)
 	}
 	// The source was checked for an active turn before copying. Once the target
 	// resumes, ownership can commit without waiting for the idle source runtime
 	// to shut down. A later move back still unloads that runtime before copying.
+	return nil
+}
+
+// Paginated threads can retain a canonical path after their runtime unloads.
+// Retry by ID only for that specific rejection, then verify the resolved head
+// before the caller commits ownership or submits a turn.
+func resumeCopiedThread(ctx context.Context, target appServerRequester, threadID, targetHome, targetPath string, params json.RawMessage) error {
+	_, err := target.Request(ctx, "thread/resume", params)
+	if err == nil {
+		return nil
+	}
+	message := strings.ToLower(err.Error())
+	if !strings.Contains(message, "cannot resume paginated thread") || !strings.Contains(message, "with stale path") {
+		return err
+	}
+	loaded, checkErr := loadedThreadIDs(ctx, target)
+	if checkErr != nil {
+		return checkErr
+	}
+	if containsThreadID(loaded, threadID) {
+		return errThreadUnloading
+	}
+	var retry map[string]json.RawMessage
+	if decodeErr := json.Unmarshal(params, &retry); decodeErr != nil {
+		return decodeErr
+	}
+	delete(retry, "path")
+	retryParams, _ := json.Marshal(retry)
+	response, retryErr := target.Request(ctx, "thread/resume", retryParams)
+	if retryErr != nil {
+		return retryErr
+	}
+	var result struct {
+		Thread struct {
+			ID   string `json:"id"`
+			Path string `json:"path"`
+		} `json:"thread"`
+	}
+	if decodeErr := json.Unmarshal(response.Result, &result); decodeErr != nil {
+		return decodeErr
+	}
+	expected, expectedErr := relativePathInside(targetHome, targetPath)
+	actual, actualErr := relativePathInside(targetHome, result.Thread.Path)
+	same := actual == expected
+	if runtime.GOOS == "windows" {
+		same = strings.EqualFold(actual, expected)
+	}
+	if result.Thread.ID != threadID || result.Thread.Path == "" || expectedErr != nil || actualErr != nil || !same {
+		return errors.New("Codex resolved a different history head; subscription was not changed to avoid reopening stale history")
+	}
 	return nil
 }
 
