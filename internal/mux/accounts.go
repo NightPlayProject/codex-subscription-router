@@ -470,8 +470,7 @@ func aggregateRateLimits(snapshots []AccountSnapshot) (*RateLimits, error) {
 			primary = append(primary, snapshot.RateLimits.Primary)
 			secondary = append(secondary, snapshot.RateLimits.Secondary)
 		}
-		weekly, _ := longestAndShortestWindow(snapshot.RateLimits)
-		if weekly == nil || weekly.UsedPercent < 100 {
+		if accountHasCapacity(snapshot) {
 			hasCapacity = true
 		}
 	}

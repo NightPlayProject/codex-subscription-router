@@ -1,6 +1,7 @@
 package mux
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -511,6 +512,12 @@ func copyRegularFileReplacing(sourcePath, destinationPath string) error {
 	if !info.Mode().IsRegular() {
 		return errors.New("source rollout is not a regular file")
 	}
+	// Avoid rewriting and syncing unchanged retained pages on repeat switches.
+	if same, err := sameRegularFileContents(sourcePath, destinationPath); err != nil {
+		return err
+	} else if same {
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(destinationPath), 0o700); err != nil {
 		return err
 	}
@@ -555,4 +562,48 @@ func copyRegularFileReplacing(sourcePath, destinationPath string) error {
 	}
 	cleanup = false
 	return nil
+}
+
+func sameRegularFileContents(source, destination string) (bool, error) {
+	a, err := os.Lstat(source)
+	if err != nil {
+		return false, err
+	}
+	b, err := os.Lstat(destination)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !a.Mode().IsRegular() || !b.Mode().IsRegular() || a.Size() != b.Size() {
+		return false, nil
+	}
+	left, err := os.Open(source)
+	if err != nil {
+		return false, err
+	}
+	defer left.Close()
+	right, err := os.Open(destination)
+	if err != nil {
+		return false, err
+	}
+	defer right.Close()
+	x, y := make([]byte, 128*1024), make([]byte, 128*1024)
+	for {
+		n, e := left.Read(x)
+		m, f := io.ReadFull(right, y[:n])
+		if m != n || !bytes.Equal(x[:n], y[:m]) {
+			return false, nil
+		}
+		if f != nil {
+			return false, f
+		}
+		if e == io.EOF {
+			return true, nil
+		}
+		if e != nil {
+			return false, e
+		}
+	}
 }

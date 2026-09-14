@@ -141,7 +141,19 @@ func (m *Multiplexer) routeGoalAtTurnBoundary(accountID, id string) {
 	}
 	preferred, ok := m.preferredThreadAccount(accountID)
 	if !ok {
-		return
+		if m.store.PreferredNewThreadAccountID() != "" {
+			return
+		}
+		current, err := m.accountSnapshotWithProfile(ctx, accountID, false)
+		if err != nil || accountHasCapacity(current) {
+			return
+		}
+		fallback, _, err := m.chooseAccountExcluding(ctx, map[string]struct{}{accountID: {}})
+		if err != nil {
+			m.publish(Event{Type: "goal-failover-failed", AccountID: accountID, Message: err.Error()})
+			return
+		}
+		preferred = fallback
 	}
 	snapshot, err := m.accountSnapshotWithProfile(ctx, preferred.ID, false)
 	if err != nil || !accountHasCapacity(snapshot) {

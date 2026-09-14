@@ -467,3 +467,15 @@ func TestResumeCopiedThreadStalePathRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestCompareRetainedHistoryContent(t *testing.T) {
+	a, b := filepath.Join(t.TempDir(), "a"), filepath.Join(t.TempDir(), "b")
+	for _, pair := range [][2]string{{"same", "same"}, {"aaaa", "bbbb"}, {"a", "longer"}, {"", ""}} {
+		os.WriteFile(a, []byte(pair[0]), 0600)
+		os.WriteFile(b, []byte(pair[1]), 0600)
+		same, err := sameRegularFileContents(a, b)
+		if err != nil || same != (pair[0] == pair[1]) {
+			t.Fatalf("comparison failed: %v %v", same, err)
+		}
+	}
+}

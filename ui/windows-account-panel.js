@@ -67,7 +67,7 @@
     style.textContent = `
       #${ROOT_ID}{position:fixed;right:18px;bottom:18px;z-index:40;font:13px/1.35 system-ui,-apple-system,Segoe UI,sans-serif;color:#f5f5f5}
       #${ROOT_ID} *{box-sizing:border-box}
-      html:has([role="dialog"]) #${ROOT_ID},html:has([role="menu"]) #${ROOT_ID},html:has(dialog[open]) #${ROOT_ID},html:not(:has(main[data-app-shell-main-surface])) #${ROOT_ID}{display:none}
+      html:has([role="dialog"]) #${ROOT_ID},html:has([role="menu"]) #${ROOT_ID},html:has(dialog[open]) #${ROOT_ID},html:not(:has(main[data-app-shell-main-surface] [contenteditable="true"])) #${ROOT_ID}{display:none}
       #${ROOT_ID} button,#${ROOT_ID} input,#${ROOT_ID} select{font:inherit}
       .cmx-launch{border:1px solid rgba(255,255,255,.18);background:#202020;color:#fff;border-radius:999px;padding:9px 13px;box-shadow:0 10px 30px rgba(0,0,0,.32);cursor:pointer}
       .cmx-panel{width:min(390px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 80px));overflow:auto;margin-bottom:10px;padding:14px;border:1px solid rgba(255,255,255,.15);border-radius:16px;background:rgba(24,24,24,.97);box-shadow:0 18px 50px rgba(0,0,0,.45);backdrop-filter:blur(12px)}
