@@ -86,9 +86,18 @@ func resumeThreadBetweenAccounts(
 	if err := ensureThreadUnloaded(ctx, target, threadID); err != nil {
 		return fmt.Errorf("prepare target chat: %w", err)
 	}
+	// Database-backed history must be quiescent on both accounts before copying.
+	if _, statErr := os.Stat(filepath.Join(sourceHome, "state_5.sqlite")); statErr == nil {
+		if err := ensureThreadUnloaded(ctx, source, threadID); err != nil {
+			return fmt.Errorf("release source history: %w", err)
+		}
+	}
 	targetPath, err := copyThreadRolloutLineage(sourceHome, targetHome, threadID, sourcePath)
 	if err != nil {
 		return fmt.Errorf("copy existing chat history: %w", err)
+	}
+	if err := copyThreadDatabases(ctx, sourceHome, targetHome, threadID, targetPath); err != nil {
+		return err
 	}
 	resumeParams, _ := json.Marshal(map[string]any{
 		"threadId":      threadID,

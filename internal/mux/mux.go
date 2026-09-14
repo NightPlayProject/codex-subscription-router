@@ -82,6 +82,7 @@ type Multiplexer struct {
 	batchMu          sync.Mutex
 	batchStatus      RoutingStatus
 	batchGeneration  uint64
+	goalExclusions   map[string]map[string]time.Time
 
 	profileMu     sync.Mutex
 	profileClient *http.Client
@@ -279,7 +280,7 @@ func (m *Multiplexer) routeExistingRequest(message protocol.Message) {
 		m.write(protocol.Failure(message.ID, -32022, "no controller account is configured"))
 		return
 	}
-	if message.Method == "turn/start" && threadID != "" {
+	if (message.Method == "turn/start" || startsGoal(message)) && threadID != "" {
 		go m.routeTurnStart(message, threadID, accountID)
 		return
 	}
@@ -491,7 +492,7 @@ func (m *Multiplexer) failoverTurn(
 }
 
 func (m *Multiplexer) moveThreadToAccount(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
-	return m.moveThreadToAccountWithResume(ctx, threadID, sourceAccountID, targetAccountID, m.resumeThreadOnAccount)
+	return m.moveThreadWithGoal(ctx, threadID, sourceAccountID, targetAccountID)
 }
 
 func (m *Multiplexer) moveThreadToAccountWithResume(
@@ -602,7 +603,7 @@ func (m *Multiplexer) handleInbound(inbound backend.Inbound) {
 		}
 		m.externalMu.Unlock()
 		if ok {
-			if route.method == "turn/start" && isUsageLimitResponse(message) {
+			if (route.method == "turn/start" || startsGoal(route.message)) && isUsageLimitResponse(message) {
 				go m.retryTurnAfterUsageLimit(route, inbound.AccountID)
 				return
 			}
@@ -615,6 +616,22 @@ func (m *Multiplexer) handleInbound(inbound backend.Inbound) {
 		m.forwardServerRequest(inbound)
 		return
 	}
+	if message.Method == "thread/goal/updated" {
+		var params struct {
+			ThreadID string `json:"threadId"`
+			Goal     struct {
+				Status string `json:"status"`
+			} `json:"goal"`
+		}
+		if json.Unmarshal(message.Params, &params) == nil && params.ThreadID != "" && params.Goal.Status == "usageLimited" {
+			go func() {
+				if !m.routeLimitedGoal(inbound.AccountID, params.ThreadID) {
+					m.writeRaw(inbound.Raw)
+				}
+			}()
+			return
+		}
+	}
 	if message.Method == "account/rateLimits/updated" {
 		go m.forwardAggregatedRateLimitNotification(inbound.Raw)
 		return
@@ -623,6 +640,9 @@ func (m *Multiplexer) handleInbound(inbound backend.Inbound) {
 		if threadID := threadIDFromNotification(message.Params); threadID != "" {
 			_ = m.store.LearnThreadOwner(threadID, inbound.AccountID)
 		}
+	}
+	if message.Method == "turn/completed" {
+		go m.routeGoalAtTurnBoundary(inbound.AccountID, threadIDFromNotification(message.Params))
 	}
 	if message.Method == "turn/completed" ||
 		message.Method == "account/login/completed" ||

@@ -32,3 +32,13 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 [Unreleased]: https://github.com/b-nnett/codex-subscription-router/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/b-nnett/codex-subscription-router/releases/tag/v0.1.0
+
+## Windows history, goal routing, and window isolation
+
+- Transfer per-task paginated history indexes and goal counters alongside rollout files; validate matching database schemas and preserve unrelated tasks.
+- Pause goal continuation during migration and activate it after ownership commits. Route goal start/resume requests and usage-limited goal notifications through subscription selection, with bounded retries.
+- Apply manual subscription changes at turn boundaries, including autonomous goals.
+- Mount subscription controls only in the main workspace; hide them behind native dialogs and menus, and exclude pet windows.
+- Add opt-in native app-server migration verification with disposable profiles, repeated account moves, changed paginated heads, and goal counter checks. Set CODEX_ROUTER_TEST_EXECUTABLE to run it.
+
+Native migration has been verified without account credentials or generated replies. Authenticated quota failover, live goal continuation, and full native feature parity still require end-to-end verification. Unknown database schema combinations are rejected rather than migrated speculatively.

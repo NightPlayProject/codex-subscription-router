@@ -25,11 +25,11 @@ class Element {
   }
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
-async function setup() {
+async function setup(mainWorkspace = true) {
   const body = new Element('body');
   const state = { accounts: [{ id: 'primary', label: 'Primary', controller: true, connected: true, enabled: true }], calls: [] };
   const context = {
-    document: { addEventListener: (name, handler) => { state[name] = handler; }, body, head: new Element('head'), readyState: 'complete', getElementById: () => null, createElement: tag => new Element(tag) },
+    document: { querySelector: () => mainWorkspace ? {} : null, addEventListener: (name, handler) => { state[name] = handler; }, body, head: new Element('head'), readyState: 'complete', getElementById: () => null, createElement: tag => new Element(tag) },
     window: {}, Intl, URL, setTimeout,
     setInterval: (callback, delay) => { if (delay === 1000) state.poll = callback; else state.updatePoll = callback; },
     fetch: async (url, options) => {
@@ -227,4 +227,10 @@ test('blur before change does not replace a pending subscription selection', asy
  assert(ui.all().includes(select));
  select.events.change(); await settle();
  assert.equal(ui.state.accountId, 'primary');
+});
+
+test('pet and auxiliary windows do not mount subscription controls or poll', async () => {
+ const ui = await setup(false);
+ assert(!ui.button('Subscriptions'));
+ assert.equal(ui.state.calls.length, 0);
 });
