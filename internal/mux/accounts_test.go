@@ -150,3 +150,16 @@ func TestRouteUrgencyFallsBackToWeeklyUtilization(t *testing.T) {
 		t.Fatalf("fallback should prefer the less-used account: less=%f more=%f", lessUsed, moreUsed)
 	}
 }
+
+func TestCapacityRequiresBothUsageWindows(t *testing.T) {
+	shortMinutes, weeklyMinutes := int64(300), int64(10080)
+	for _, values := range [][2]float64{{100, 20}, {20, 100}, {100, 100}, {20, 20}} {
+		snapshot := AccountSnapshot{Enabled: true, Connected: true, AuthType: "chatgpt", RateLimits: &RateLimits{
+			Primary:   &RateLimitWindow{UsedPercent: values[0], WindowDurationMins: &shortMinutes},
+			Secondary: &RateLimitWindow{UsedPercent: values[1], WindowDurationMins: &weeklyMinutes},
+		}}
+		if accountHasCapacity(snapshot) != (values[0] < 100 && values[1] < 100) {
+			t.Fatalf("wrong capacity for %v", values)
+		}
+	}
+}

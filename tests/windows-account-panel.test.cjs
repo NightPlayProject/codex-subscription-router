@@ -30,7 +30,7 @@ async function setup() {
   const state = { accounts: [{ id: 'primary', label: 'Primary', controller: true, connected: true, enabled: true }], calls: [] };
   const context = {
     document: { addEventListener: (name, handler) => { state[name] = handler; }, body, head: new Element('head'), readyState: 'complete', getElementById: () => null, createElement: tag => new Element(tag) },
-    window: {}, Intl, URL,
+    window: {}, Intl, URL, setTimeout,
     setInterval: (callback, delay) => { if (delay === 1000) state.poll = callback; else state.updatePoll = callback; },
     fetch: async (url, options) => {
       const route = url.split('/v1')[1];
@@ -184,6 +184,7 @@ test('open dropdown survives polling and update completion until blur', async ()
   ui.button('Check for updates').events.click(); await settle();
   assert(ui.all().includes(select), 'refresh replaced an open dropdown');
   select.events.blur();
+  await new Promise(resolve => setTimeout(resolve, 5));
   assert(!ui.all().includes(select));
   assert(ui.all().some(item => item.textContent === 'Preparing chats'));
 });
@@ -215,3 +216,15 @@ test('dropdown selection commits while background render is pending', async () =
   ui.state.updatePoll(); await settle();
   assert(ui.button('Update on next launch'));
  });
+
+test('blur before change does not replace a pending subscription selection', async () => {
+ const ui = await setup();
+ const select = ui.all().find(item => item.attributes['aria-label'] === 'Subscription for all chats');
+ select.events.focus();
+ ui.button('Check for updates').events.click(); await settle();
+ select.value = 'primary';
+ select.events.blur();
+ assert(ui.all().includes(select));
+ select.events.change(); await settle();
+ assert.equal(ui.state.accountId, 'primary');
+});

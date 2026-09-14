@@ -858,8 +858,8 @@ func accountHasCapacity(snapshot AccountSnapshot) bool {
 	if !snapshot.Enabled || !snapshot.Connected || snapshot.AuthType != "chatgpt" {
 		return false
 	}
-	weekly, _ := longestAndShortestWindow(snapshot.RateLimits)
-	return weekly == nil || weekly.UsedPercent < 100
+	weekly, short := longestAndShortestWindow(snapshot.RateLimits)
+	return (weekly == nil || weekly.UsedPercent < 100) && (short == nil || short.UsedPercent < 100)
 }
 
 func isUsageLimitResponse(message protocol.Message) bool {

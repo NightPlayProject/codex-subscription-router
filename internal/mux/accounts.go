@@ -327,7 +327,7 @@ func (m *Multiplexer) chooseAccountWithPreference(ctx context.Context, excluded 
 			continue
 		}
 		weekly, short := longestAndShortestWindow(snapshot.RateLimits)
-		if weekly != nil && weekly.UsedPercent >= 100 {
+		if !accountHasCapacity(snapshot) {
 			continue
 		}
 		weeklyUsed := 1_000.0

@@ -148,7 +148,7 @@
       };
       select.addEventListener("pointerdown", hold);
       select.addEventListener("focus", hold);
-      select.addEventListener("blur", release);
+      select.addEventListener("blur", () => setTimeout(release, 0));
       return release;
     }
     let accounts = [];
