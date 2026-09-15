@@ -17,13 +17,13 @@ var revisionPattern = regexp.MustCompile(`^[a-f0-9]{40}$`)
 
 type updateStatus struct {
 	Supported bool   `json:"supported"`
+	Version   string `json:"version,omitempty"`
 	Current   string `json:"current,omitempty"`
 	Latest    string `json:"latest,omitempty"`
 	Available bool   `json:"available"`
 	Queued    bool   `json:"queued"`
 	Error     string `json:"error,omitempty"`
 }
-
 type updateManager struct {
 	mu      sync.Mutex
 	current string
@@ -35,7 +35,7 @@ type updateManager struct {
 }
 
 func newUpdateManager() *updateManager {
-	m := &updateManager{client: &http.Client{Timeout: 8 * time.Second}, url: "https://api.github.com/repos/NightPlayProject/codex-subscription-router/commits/main"}
+	m := &updateManager{client: &http.Client{Timeout: 8 * time.Second}, url: "https://api.github.com/repos/NightPlayProject/codex-subscription-router/releases/latest"}
 	root := os.Getenv("CODEX_ROUTER_INSTALL_ROOT")
 	local := os.Getenv("LOCALAPPDATA")
 	if root == "" {
@@ -57,10 +57,12 @@ func newUpdateManager() *updateManager {
 		return m
 	}
 	m.current = info.Revision
+	if versionRaw, err := os.ReadFile(filepath.Join(root, "VERSION")); err == nil {
+		m.status.Version = string(versionRaw)
+	}
 	m.data = filepath.Join(local, "Codex Subscription Router")
 	return m
 }
-
 func (m *updateManager) check(ctx context.Context, force bool) updateStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -69,7 +71,7 @@ func (m *updateManager) check(ctx context.Context, force bool) updateStatus {
 	}
 	if force || m.checked.IsZero() || time.Since(m.checked) >= time.Hour {
 		m.checked = time.Now()
-		m.status = updateStatus{Supported: true, Current: m.current}
+		m.status = updateStatus{Supported: true, Current: m.current, Version: m.status.Version}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.url, nil)
 		if err == nil {
 			req.Header.Set("Accept", "application/vnd.github+json")
@@ -81,16 +83,21 @@ func (m *updateManager) check(ctx context.Context, force bool) updateStatus {
 				if res.StatusCode != http.StatusOK {
 					err = fmt.Errorf("update check returned HTTP %d", res.StatusCode)
 				} else {
-					var commit struct {
-						SHA string `json:"sha"`
+					var release struct {
+						Target string `json:"target_commitish"`
+						SHA    string `json:"sha"`
+						Tag    string `json:"tag_name"`
 					}
-					err = json.NewDecoder(io.LimitReader(res.Body, 1024*1024)).Decode(&commit)
-					if err == nil && !revisionPattern.MatchString(commit.SHA) {
+					err = json.NewDecoder(io.LimitReader(res.Body, 1024*1024)).Decode(&release)
+					if release.Target == "" {
+						release.Target = release.SHA
+					}
+					if err == nil && !revisionPattern.MatchString(release.Target) {
 						err = fmt.Errorf("invalid update revision")
 					}
 					if err == nil {
-						m.status.Latest = commit.SHA
-						m.status.Available = commit.SHA != m.current
+						m.status.Latest = release.Target
+						m.status.Available = release.Target != m.current
 					}
 				}
 			}
@@ -104,7 +111,6 @@ func (m *updateManager) check(ctx context.Context, force bool) updateStatus {
 	m.status.Queued = err == nil
 	return m.status
 }
-
 func (m *updateManager) queue() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -132,7 +138,6 @@ func (m *updateManager) queue() error {
 	}
 	return f.Close()
 }
-
 func (s *Server) updates(response http.ResponseWriter, request *http.Request) {
 	if !s.authorized(request) {
 		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})

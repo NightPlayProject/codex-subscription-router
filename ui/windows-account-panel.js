@@ -526,6 +526,9 @@
       const updateLabel = document.createElement('div');
       updateLabel.className = 'cmx-muted';
       updateLabel.setAttribute('role', 'status');
+      const versionLabel = document.createElement('div');
+      versionLabel.className = 'cmx-muted';
+      versionLabel.textContent = update?.version ? `Router version: ${update.version.trim()}` : 'Router version unavailable';
       updateLabel.textContent = updateBusy ? 'Checking for updates…'
         : update?.queued ? 'Update queued. Close Codex when ready, then open the Start menu shortcut. Updating may take a few minutes.'
         : update?.error ? `Could not check for updates: ${update.error}`
@@ -535,7 +538,7 @@
       const check = createButton('Check for updates');
       check.disabled = updateBusy;
       check.addEventListener('click', checkUpdates);
-      updates.append(updateLabel, check);
+      updates.append(versionLabel, updateLabel, check);
       if (update?.available && !update.queued) {
         const queue = createButton('Update on next launch');
         queue.disabled = updateBusy;
