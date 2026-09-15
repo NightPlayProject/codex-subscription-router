@@ -157,7 +157,13 @@ Copy-Item -LiteralPath (Join-Path $ProjectRoot 'windows\identity.ps1') -Destinat
 Copy-Item -LiteralPath (Join-Path $ProjectRoot 'windows\Wallpapers.ps1') -Destination $Destination
 $revision = (& git.exe -C $ProjectRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $revision -cnotmatch '^[a-f0-9]{40}$') { throw 'Could not identify the installed source revision.' }
-@{ revision = $revision; wallpapers = '054348d193b4f68a0f96c1ae0f900776c2d2616c' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Destination 'build-info.json') -Encoding ASCII
+@{
+  revision = $revision
+  wallpapers = '054348d193b4f68a0f96c1ae0f900776c2d2616c'
+  routerVersion = '26.908.4834.0'
+  muxSha256 = (Get-FileHash -LiteralPath $installedMux -Algorithm SHA256).Hash
+  installedAt = (Get-Date).ToUniversalTime().ToString('o')
+} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Destination 'build-info.json') -Encoding ASCII
 
 # The small shortcut dispatcher lives outside the replaceable application.
 $launcherRoot = Join-Path $env:LOCALAPPDATA 'Codex Subscription Router\Launcher'

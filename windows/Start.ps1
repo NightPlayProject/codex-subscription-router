@@ -3,8 +3,19 @@ $data = Split-Path $PSScriptRoot -Parent
 $config = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'install.json') -Raw | ConvertFrom-Json
 $destination = [IO.Path]::GetFullPath($config.destination)
 $request = Join-Path $data 'update-request.json'
+$buildInfo = Join-Path $destination 'build-info.json'
 $mutex = New-Object Threading.Mutex($false, 'Local.CodexRouter.CombinedLaunch')
 $locked = $false
+
+function Test-RouterInstallState {
+    if (-not (Test-Path -LiteralPath $buildInfo)) { return $false }
+    try {
+        $info = Get-Content -LiteralPath $buildInfo -Raw | ConvertFrom-Json
+        return ($info.routerVersion -eq '26.908.4834.0' -and $info.revision -match '^[a-f0-9]{40}$')
+    } catch {
+        return $false
+    }
+}
 function Invoke-Native([string]$File, [string[]]$Arguments) {
     & $File @Arguments | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "$File failed ($LASTEXITCODE)." }
@@ -12,6 +23,12 @@ function Invoke-Native([string]$File, [string[]]$Arguments) {
 try {
     try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
     if (-not $locked) { return }
+    if (-not (Test-RouterInstallState) -and -not (Test-Path -LiteralPath $request)) {
+        # Older installations do not have migration metadata. Keep startup
+        # working, but mark them so the normal update queue can migrate them.
+        @{ reason = 'legacy-install-metadata'; createdAt = (Get-Date).ToUniversalTime().ToString('o') } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $data 'migration-needed.json') -Encoding UTF8
+    }
     $prefix = $destination.TrimEnd('\') + '\'
     $running = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
         $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
@@ -45,3 +62,4 @@ try {
     if ($locked) { $mutex.ReleaseMutex() }
     $mutex.Dispose()
 }
+
