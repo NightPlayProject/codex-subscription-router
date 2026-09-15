@@ -39,6 +39,10 @@ func (m *Multiplexer) moveThreadWithGoal(ctx context.Context, id, sourceID, targ
 }
 
 func (m *Multiplexer) moveThreadWithGoalOptions(ctx context.Context, id, sourceID, targetID string, allowChatGPTWebSource bool) error {
+	return m.moveThreadWithGoalMigrationOptions(ctx, id, sourceID, targetID, allowChatGPTWebSource, false)
+}
+
+func (m *Multiplexer) moveThreadWithGoalMigrationOptions(ctx context.Context, id, sourceID, targetID string, allowChatGPTWebSource, waitForSourceIdle bool) error {
 	if sourceID == targetID {
 		return nil
 	}
@@ -70,10 +74,13 @@ func (m *Multiplexer) moveThreadWithGoalOptions(ctx context.Context, id, sourceI
 		if err := setGoalStatus(ctx, source, id, "paused"); err != nil {
 			return err
 		}
+		waitForSourceIdle = true
 	}
-	resume := m.resumeThreadOnAccount
-	if allowChatGPTWebSource {
-		resume = m.resumeThreadOnAccountAllowChatGPTWebSource
+	if status == "usageLimited" {
+		waitForSourceIdle = true
+	}
+	resume := func(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
+		return m.resumeThreadOnAccountWithOptions(ctx, threadID, sourceAccountID, targetAccountID, allowChatGPTWebSource, waitForSourceIdle)
 	}
 	err := m.moveThreadToAccountWithResume(ctx, id, sourceID, targetID, resume)
 	if err != nil {

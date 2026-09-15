@@ -236,6 +236,83 @@ func TestResumeThreadBetweenAccountsUsesTargetLocalPathAndUnloadsStaleTarget(t *
 	}
 }
 
+func TestResumeThreadBetweenAccountsWaitsForUsageLimitedSourceToSettle(t *testing.T) {
+	sourceHome := filepath.Join(t.TempDir(), "primary")
+	targetHome := filepath.Join(t.TempDir(), "secondary")
+	threadID := "usage-limited-chat"
+	sourcePath := filepath.Join(sourceHome, "sessions", "2026", "09", "14", "rollout-"+threadID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte(`{"type":"session_meta","payload":{"session_id":"usage-limited-chat"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reads := 0
+	source := &fakeRequester{request: func(method string, _ json.RawMessage) (protocol.Message, error) {
+		if method != "thread/read" {
+			return protocol.Message{}, errors.New("unexpected source request: " + method)
+		}
+		reads++
+		status := "active"
+		if reads > 1 {
+			status = "idle"
+		}
+		result, _ := json.Marshal(map[string]any{"thread": map[string]any{
+			"id": threadID, "path": sourcePath, "cwd": `C:\\work`, "modelProvider": "openai", "status": map[string]any{"type": status},
+		}})
+		return protocol.Message{Result: result}, nil
+	}}
+
+	resumed := false
+	target := &fakeRequester{request: func(method string, _ json.RawMessage) (protocol.Message, error) {
+		switch method {
+		case "thread/loaded/list":
+			return protocol.Message{Result: json.RawMessage(`{"data":[]}`)}, nil
+		case "thread/resume":
+			resumed = true
+			return protocol.Message{Result: json.RawMessage(`{"thread":{"id":"usage-limited-chat"}}`)}, nil
+		default:
+			return protocol.Message{}, errors.New("unexpected target request: " + method)
+		}
+	}}
+
+	err := resumeThreadBetweenAccountsWithOptions(
+		context.Background(), threadID, sourceHome, targetHome, source, target,
+		threadMigrationOptions{waitForSourceIdle: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reads < 2 {
+		t.Fatalf("source reads = %d, want transition recheck", reads)
+	}
+	if !resumed {
+		t.Fatal("usage-limited source never resumed on target")
+	}
+}
+
+func TestResumeThreadBetweenAccountsStillRejectsUnrelatedActiveSource(t *testing.T) {
+	sourceHome := t.TempDir()
+	targetHome := t.TempDir()
+	threadID := "active-chat"
+	source := &fakeRequester{request: func(method string, _ json.RawMessage) (protocol.Message, error) {
+		if method != "thread/read" {
+			return protocol.Message{}, errors.New("unexpected source request: " + method)
+		}
+		result, _ := json.Marshal(map[string]any{"thread": map[string]any{
+			"id": threadID, "path": filepath.Join(sourceHome, "chat.jsonl"), "status": map[string]any{"type": "active"},
+		}})
+		return protocol.Message{Result: result}, nil
+	}}
+	target := &fakeRequester{request: func(method string, _ json.RawMessage) (protocol.Message, error) {
+		return protocol.Message{}, errors.New("target should not be called: " + method)
+	}}
+	if err := resumeThreadBetweenAccounts(context.Background(), threadID, sourceHome, targetHome, source, target); !errors.Is(err, errChatActive) {
+		t.Fatalf("active source error = %v, want %v", err, errChatActive)
+	}
+}
+
 func TestResumeThreadBetweenAccountsAcceptsNotSubscribedWhileTargetUnloads(t *testing.T) {
 	sourceHome := filepath.Join(t.TempDir(), "primary")
 	targetHome := filepath.Join(t.TempDir(), "secondary")

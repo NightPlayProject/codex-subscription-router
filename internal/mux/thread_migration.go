@@ -35,6 +35,7 @@ type appServerRequester interface {
 
 type threadMigrationOptions struct {
 	allowChatGPTWebSource bool
+	waitForSourceIdle     bool
 }
 
 func resumeThreadBetweenAccounts(
@@ -91,7 +92,19 @@ func resumeThreadBetweenAccountsWithOptions(
 			return errors.New("existing chat has no resumable history path")
 		}
 		if readResult.Thread.Status.Type == "active" {
-			return errChatActive
+			if !options.waitForSourceIdle {
+				return errChatActive
+			}
+			readResponse, err = waitForSourceThreadIdle(ctx, source, threadID)
+			if err != nil {
+				return err
+			}
+			if err := json.Unmarshal(readResponse.Result, &readResult); err != nil {
+				return fmt.Errorf("decode settled chat: %w", err)
+			}
+			if readResult.Thread.ID != threadID || readResult.Thread.Path == "" {
+				return errors.New("settled chat has no resumable history path")
+			}
 		}
 		sourcePath = readResult.Thread.Path
 		sourceCWD = readResult.Thread.CWD
@@ -151,6 +164,50 @@ func resumeThreadBetweenAccountsWithOptions(
 	// resumes, ownership can commit without waiting for the idle source runtime
 	// to shut down. A later move back still unloads that runtime before copying.
 	return nil
+}
+
+func waitForSourceThreadIdle(ctx context.Context, child appServerRequester, threadID string) (protocol.Message, error) {
+	params, _ := json.Marshal(map[string]any{"threadId": threadID, "includeTurns": false})
+	deadline := time.Now().Add(threadUnloadWaitLimit)
+	interval := threadUnloadPollInterval
+	for {
+		response, err := child.Request(ctx, "thread/read", params)
+		if err != nil {
+			return protocol.Message{}, fmt.Errorf("wait for source chat to settle: %w", err)
+		}
+		var result struct {
+			Thread struct {
+				ID     string `json:"id"`
+				Status struct {
+					Type string `json:"type"`
+				} `json:"status"`
+			} `json:"thread"`
+		}
+		if err := json.Unmarshal(response.Result, &result); err != nil {
+			return protocol.Message{}, fmt.Errorf("decode settling chat: %w", err)
+		}
+		if result.Thread.ID != threadID {
+			return protocol.Message{}, errors.New("settling chat returned a different thread")
+		}
+		if result.Thread.Status.Type != "active" {
+			return response, nil
+		}
+		if !time.Now().Before(deadline) {
+			return protocol.Message{}, errChatActive
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return protocol.Message{}, ctx.Err()
+		case <-timer.C:
+		}
+		if interval < 400*time.Millisecond {
+			interval *= 2
+		}
+	}
 }
 
 // Paginated threads can retain a canonical path after their runtime unloads.

@@ -455,7 +455,7 @@ func (m *Multiplexer) routeTurnStart(message protocol.Message, threadID, ownerID
 		return
 	}
 	excluded := map[string]struct{}{ownerID: {}}
-	m.failoverTurn(ctx, message, threadID, ownerID, excluded)
+	m.failoverTurn(ctx, message, threadID, ownerID, excluded, false)
 }
 
 func (m *Multiplexer) preferredThreadAccount(ownerID string) (state.Account, bool) {
@@ -491,13 +491,14 @@ func (m *Multiplexer) failoverTurn(
 	threadID string,
 	sourceAccountID string,
 	excluded map[string]struct{},
+	waitForSourceIdle bool,
 ) {
 	fallback, _, err := m.chooseAccountExcluding(ctx, excluded)
 	if err != nil {
 		m.write(m.allSubscriptionsDepleted(ctx, message.ID))
 		return
 	}
-	if err := m.moveThreadToAccountForRequest(ctx, threadID, sourceAccountID, fallback.ID, message); err != nil {
+	if err := m.moveThreadToAccountForRequestWithTransition(ctx, threadID, sourceAccountID, fallback.ID, message, waitForSourceIdle); err != nil {
 		m.write(protocol.Failure(message.ID, -32027, fmt.Sprintf("move chat to %s: %v", fallback.Label, err)))
 		return
 	}
@@ -524,10 +525,21 @@ func (m *Multiplexer) moveThreadToAccountForRequest(
 	targetAccountID string,
 	message protocol.Message,
 ) error {
+	return m.moveThreadToAccountForRequestWithTransition(ctx, threadID, sourceAccountID, targetAccountID, message, false)
+}
+
+func (m *Multiplexer) moveThreadToAccountForRequestWithTransition(
+	ctx context.Context,
+	threadID string,
+	sourceAccountID string,
+	targetAccountID string,
+	message protocol.Message,
+	waitForSourceIdle bool,
+) error {
 	if requestExplicitlyUsesNativeModel(message) {
-		return m.moveThreadWithGoalOptions(ctx, threadID, sourceAccountID, targetAccountID, true)
+		return m.moveThreadWithGoalMigrationOptions(ctx, threadID, sourceAccountID, targetAccountID, true, waitForSourceIdle)
 	}
-	return m.moveThreadToAccount(ctx, threadID, sourceAccountID, targetAccountID)
+	return m.moveThreadWithGoalMigrationOptions(ctx, threadID, sourceAccountID, targetAccountID, false, waitForSourceIdle)
 }
 
 func (m *Multiplexer) moveThreadToAccountWithResume(
@@ -550,14 +562,14 @@ func (m *Multiplexer) moveThreadToAccountWithResume(
 }
 
 func (m *Multiplexer) resumeThreadOnAccount(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
-	return m.resumeThreadOnAccountWithOptions(ctx, threadID, sourceAccountID, targetAccountID, false)
+	return m.resumeThreadOnAccountWithOptions(ctx, threadID, sourceAccountID, targetAccountID, false, false)
 }
 
 func (m *Multiplexer) resumeThreadOnAccountAllowChatGPTWebSource(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
-	return m.resumeThreadOnAccountWithOptions(ctx, threadID, sourceAccountID, targetAccountID, true)
+	return m.resumeThreadOnAccountWithOptions(ctx, threadID, sourceAccountID, targetAccountID, true, false)
 }
 
-func (m *Multiplexer) resumeThreadOnAccountWithOptions(ctx context.Context, threadID, sourceAccountID, targetAccountID string, allowChatGPTWebSource bool) error {
+func (m *Multiplexer) resumeThreadOnAccountWithOptions(ctx context.Context, threadID, sourceAccountID, targetAccountID string, allowChatGPTWebSource, waitForSourceIdle bool) error {
 	m.migrationMu.Lock()
 	if m.migrating == nil {
 		m.migrating = make(map[string]bool)
@@ -591,7 +603,7 @@ func (m *Multiplexer) resumeThreadOnAccountWithOptions(ctx context.Context, thre
 		targetAccount.CodexHome,
 		source,
 		target,
-		threadMigrationOptions{allowChatGPTWebSource: allowChatGPTWebSource},
+		threadMigrationOptions{allowChatGPTWebSource: allowChatGPTWebSource, waitForSourceIdle: waitForSourceIdle},
 	)
 }
 
@@ -729,7 +741,7 @@ func (m *Multiplexer) retryTurnAfterUsageLimit(route externalRoute, exhaustedAcc
 	excluded[exhaustedAccountID] = struct{}{}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*requestTimeout)
 	defer cancel()
-	m.failoverTurn(ctx, route.message, threadID, exhaustedAccountID, excluded)
+	m.failoverTurn(ctx, route.message, threadID, exhaustedAccountID, excluded, true)
 }
 
 func (m *Multiplexer) forwardServerRequest(inbound backend.Inbound) {
