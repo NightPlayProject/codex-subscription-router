@@ -35,6 +35,30 @@ func TestExplicitModelSelectionSwitchesRoutingFamiliesIndependently(t *testing.T
 	}
 }
 
+func TestAutomaticTurnWithoutModelUsesNativeSubscriptionModel(t *testing.T) {
+	message := protocol.Message{
+		Method: "turn/start",
+		Params: json.RawMessage(`{"threadId":"chat"}`),
+	}
+	updated := ensureAutomaticSubscriptionModel(message)
+	model, ok := modelFromParams(updated.Params)
+	if !ok || model != automaticSubscriptionModel {
+		t.Fatalf("automatic model = %q, want %q", model, automaticSubscriptionModel)
+	}
+}
+
+func TestExplicitWebTurnKeepsWebModel(t *testing.T) {
+	message := protocol.Message{
+		Method: "turn/start",
+		Params: json.RawMessage(`{"threadId":"chat","model":"chatgpt-web/high"}`),
+	}
+	updated := ensureAutomaticSubscriptionModel(message)
+	model, ok := modelFromParams(updated.Params)
+	if !ok || model != "chatgpt-web/high" {
+		t.Fatalf("explicit Web model changed to %q", model)
+	}
+}
+
 func TestLatestThreadModelFromRolloutReadsPersistedWebSettings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rollout.jsonl")
 	content := []byte(

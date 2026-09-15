@@ -38,9 +38,30 @@ func newUpdateManager() *updateManager {
 	m := &updateManager{client: &http.Client{Timeout: 8 * time.Second}, url: "https://api.github.com/repos/NightPlayProject/codex-subscription-router/releases/latest"}
 	root := os.Getenv("CODEX_ROUTER_INSTALL_ROOT")
 	local := os.Getenv("LOCALAPPDATA")
+	// Keep the visible version available even when build-info.json is missing.
+	// Older installations can have a valid staged VERSION file before the
+	// revision metadata migration has completed.
 	if root == "" {
 		if exe, err := os.Executable(); err == nil {
 			root = filepath.Clean(filepath.Join(filepath.Dir(exe), "..", ".."))
+		}
+	}
+	if m.status.Version == "" {
+		// Development checkouts and older staged installs do not always carry the
+		// VERSION sidecar. Keep the UI useful by exposing the application version
+		// from the bundled package metadata path when available.
+		if packageRaw, err := os.ReadFile(filepath.Join(root, "package.json")); err == nil {
+			var packageInfo struct {
+				Version string `json:"version"`
+			}
+			if json.Unmarshal(packageRaw, &packageInfo) == nil {
+				m.status.Version = packageInfo.Version
+			}
+		}
+	}
+	if root != "" {
+		if versionRaw, err := os.ReadFile(filepath.Join(root, "VERSION")); err == nil {
+			m.status.Version = string(versionRaw)
 		}
 	}
 	if root == "" || local == "" {
@@ -57,9 +78,6 @@ func newUpdateManager() *updateManager {
 		return m
 	}
 	m.current = info.Revision
-	if versionRaw, err := os.ReadFile(filepath.Join(root, "VERSION")); err == nil {
-		m.status.Version = string(versionRaw)
-	}
 	m.data = filepath.Join(local, "Codex Subscription Router")
 	return m
 }

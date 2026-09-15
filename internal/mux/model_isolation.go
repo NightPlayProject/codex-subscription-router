@@ -13,6 +13,7 @@ import (
 )
 
 const chatGPTWebModelPrefix = "chatgpt-web/"
+const automaticSubscriptionModel = "gpt-5.6-codex"
 
 var errChatGPTWebThread = errors.New("ChatGPT Web chat stays on its ChatGPT Web route")
 
@@ -40,6 +41,26 @@ func modelFromParams(params json.RawMessage) (string, bool) {
 func requestExplicitlyUsesNativeModel(message protocol.Message) bool {
 	model, ok := modelFromParams(message.Params)
 	return ok && !isChatGPTWebModel(model)
+}
+
+// ensureAutomaticSubscriptionModel prevents app-server defaults from selecting
+// the ChatGPT Web model family when the user enabled automatic subscription
+// routing but did not choose a model explicitly.
+func ensureAutomaticSubscriptionModel(message protocol.Message) protocol.Message {
+	if message.Method != "turn/start" && !startsGoal(message) {
+		return message
+	}
+	if _, ok := modelFromParams(message.Params); ok {
+		return message
+	}
+	var params map[string]json.RawMessage
+	if json.Unmarshal(message.Params, &params) != nil || params == nil {
+		params = make(map[string]json.RawMessage)
+	}
+	model, _ := json.Marshal(automaticSubscriptionModel)
+	params["model"] = model
+	message.Params, _ = json.Marshal(params)
+	return message
 }
 
 func (m *Multiplexer) rememberThreadModelFamily(threadID string, web bool) {

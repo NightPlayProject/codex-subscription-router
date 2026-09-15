@@ -410,6 +410,7 @@ func (m *Multiplexer) routeAggregatedRateLimits(message protocol.Message) {
 }
 
 func (m *Multiplexer) routeTurnStart(message protocol.Message, threadID, ownerID string) {
+	message = ensureAutomaticSubscriptionModel(message)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*requestTimeout)
 	defer cancel()
 	unlock := m.lockThreadRoute(threadID)
