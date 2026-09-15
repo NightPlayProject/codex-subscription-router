@@ -25,17 +25,22 @@ type updateStatus struct {
 	Error     string `json:"error,omitempty"`
 }
 type updateManager struct {
-	mu      sync.Mutex
-	current string
-	data    string
-	checked time.Time
-	status  updateStatus
-	client  *http.Client
-	url     string
+	mu        sync.Mutex
+	current   string
+	data      string
+	checked   time.Time
+	status    updateStatus
+	client    *http.Client
+	url       string
+	branchURL string
 }
 
 func newUpdateManager() *updateManager {
-	m := &updateManager{client: &http.Client{Timeout: 8 * time.Second}, url: "https://api.github.com/repos/NightPlayProject/codex-subscription-router/releases/latest"}
+	m := &updateManager{
+		client:    &http.Client{Timeout: 8 * time.Second},
+		url:       "https://api.github.com/repos/NightPlayProject/codex-subscription-router/releases/latest",
+		branchURL: "https://api.github.com/repos/NightPlayProject/codex-subscription-router/commits/main",
+	}
 	root := os.Getenv("CODEX_ROUTER_INSTALL_ROOT")
 	local := os.Getenv("LOCALAPPDATA")
 	// Keep the visible version available even when build-info.json is missing.
@@ -116,6 +121,31 @@ func (m *updateManager) check(ctx context.Context, force bool) updateStatus {
 					if err == nil {
 						m.status.Latest = release.Target
 						m.status.Available = release.Target != m.current
+					}
+				}
+			}
+		}
+		// A release may not exist yet when a new router build has been pushed.
+		// Keep Check for updates useful by falling back to the tracked branch
+		// commit instead of leaving installed users stuck on the previous build.
+		if err != nil || !revisionPattern.MatchString(m.status.Latest) {
+			req, branchErr := http.NewRequestWithContext(ctx, http.MethodGet, m.branchURL, nil)
+			if branchErr == nil {
+				req.Header.Set("Accept", "application/vnd.github+json")
+				req.Header.Set("User-Agent", "Codex-Subscription-Router")
+				res, branchErr := m.client.Do(req)
+				if branchErr == nil {
+					defer res.Body.Close()
+					if res.StatusCode == http.StatusOK {
+						var branch struct {
+							SHA string `json:"sha"`
+						}
+						branchErr = json.NewDecoder(io.LimitReader(res.Body, 1024*1024)).Decode(&branch)
+						if branchErr == nil && revisionPattern.MatchString(branch.SHA) {
+							m.status.Latest = branch.SHA
+							m.status.Available = branch.SHA != m.current
+							err = nil
+						}
 					}
 				}
 			}
