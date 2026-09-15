@@ -11,7 +11,7 @@ function Test-RouterInstallState {
     if (-not (Test-Path -LiteralPath $buildInfo)) { return $false }
     try {
         $info = Get-Content -LiteralPath $buildInfo -Raw | ConvertFrom-Json
-        return ($info.routerVersion -eq '26.908.4834.0' -and $info.revision -match '^[a-f0-9]{40}$')
+        return ($info.routerVersion -eq '26.908.9136.0' -and $info.revision -match '^[a-f0-9]{40}$')
     } catch {
         return $false
     }

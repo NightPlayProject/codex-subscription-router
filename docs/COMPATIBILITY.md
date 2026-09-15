@@ -24,10 +24,10 @@ complete. Review the upstream change and update the patch deliberately.
 | Component | Tested value |
 | --- | --- |
 | Package identity | `OpenAI.Codex` |
-| Microsoft Store package version | `26.908.4834.0` |
-| Electron app package version | `26.908.40834` |
-| Codex build number | `8881` |
-| `app.asar` SHA-256 | `2bd5b96a48232f3ccf3df6be50965920699ea3a1b4512dcdd770e209fd1f009e` |
+| Microsoft Store package version | `26.908.9136.0` |
+| Electron app package version | `26.908.70816` |
+| Codex build number | `9275` |
+| `app.asar` SHA-256 | `7a46bd6fe162050afbac27d7d5271d19524e887fa0cdd06c0f2d3fa9b606a31d` |
 | Architecture | Windows x64 |
 
 `install.ps1` and `scripts/patch_app_windows.py` require the exact AppX identity,
@@ -36,9 +36,16 @@ no Windows compatibility override: a changed official build stops before the
 staged copy is patched. The Microsoft Store package is read-only input; the
 patcher operates only on a per-user copy.
 
-Current Windows validation covers the Go test/vet suite, Windows patcher unit
-tests, a staged ASAR/build with the exact hash above, router passthrough to the
-bundled `codex.real.exe`, and an authenticated mux control-API smoke test. On the
-test machine, the staged Electron process exits immediately while the official
-Store app remains open, so the desktop GUI and Windows Computer Use integration
-are not yet claimed as validated.
+Validation for this build covers the full Windows checks (Go tests/vet, account
+panel, patcher, launcher and endpoint tests), applying all three patches to the
+actual official ASAR and checking the resulting JavaScript syntax, and native
+app-server goal migration between disposable homes. The migration check moves a
+goal in both directions, including a changed rollout path, and verifies preserved
+usage counters. No authenticated model turn was submitted.
+
+The Windows patch now preserves both official updater startup calls, allowing
+Codex update checks and notifications to run. Router updates remain available
+through the separate Subscriptions panel. An official app update may require a
+new compatible router build; this patch does not automatically approve unknown
+ASAR hashes. Live update notifications and quota exhaustion in the desktop UI
+have not been verified on this build.

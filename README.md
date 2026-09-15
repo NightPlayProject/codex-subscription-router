@@ -78,7 +78,7 @@ Codex Subscription Router currently targets these exact upstream builds:
 | Platform | Official app | Architecture | Verification |
 | --- | --- | --- | --- |
 | macOS | ChatGPT `26.803.61601` (build `6396`) | Apple silicon (`arm64`) | Exact version/build/ASAR/native anchors |
-| Windows | `OpenAI.Codex` `26.908.4834.0` | x64 | Exact AppX identity/version and `app.asar` SHA-256 |
+| Windows | `OpenAI.Codex` `26.908.9136.0` | x64 | Exact AppX identity/version and `app.asar` SHA-256 |
 
 Go 1.26+ and Node.js 22.12+ are used for local builds on both platforms.
 
@@ -103,7 +103,7 @@ Use permissions. Ad-hoc signing is intended only for diagnostics.
 ### Windows
 
 - Windows 11 x64 with the official Microsoft Store `OpenAI.Codex` package
-  version `26.908.4834.0`
+  version `26.908.9136.0`
 - Go 1.26+
 - Node.js 22.12+ and npm
 - Python 3
@@ -327,6 +327,11 @@ the reset is consumed only for that account.
 ![Account-scoped plugin connections](screenshots/plugin-account-picker-secondary-final.png)
 
 ## Update or rebuild
+
+Windows preserves the official Codex updater startup, so update checks and
+notifications are available alongside the router's Subscriptions update check.
+The current Windows compatibility target is `26.908.9136.0`; rebuild the router
+for a newly supported official app version.
 
 ### macOS
 

@@ -7,8 +7,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ExpectedVersion = '26.908.4834.0'
-$ExpectedAsarSha256 = '2BD5B96A48232F3CCF3DF6BE50965920699EA3A1B4512DCDD770E209FD1F009E'
+$ExpectedVersion = '26.908.9136.0'
+$ExpectedAsarSha256 = '7A46BD6FE162050AFBAC27D7D5271D19524E887FA0CDD06C0F2D3FA9B606A31D'
 $ProjectRoot = $PSScriptRoot
 $Destination = [System.IO.Path]::GetFullPath($Destination)
 $FinalDestination = $Destination
@@ -160,7 +160,7 @@ if ($LASTEXITCODE -ne 0 -or $revision -cnotmatch '^[a-f0-9]{40}$') { throw 'Coul
 @{
   revision = $revision
   wallpapers = '054348d193b4f68a0f96c1ae0f900776c2d2616c'
-  routerVersion = '26.908.4834.0'
+  routerVersion = '26.908.9136.0'
   muxSha256 = (Get-FileHash -LiteralPath $installedMux -Algorithm SHA256).Hash
   installedAt = (Get-Date).ToUniversalTime().ToString('o')
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Destination 'build-info.json') -Encoding ASCII

@@ -19,8 +19,8 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONTROL_PORT = 48123
-SUPPORTED_PACKAGE_VERSION = "26.908.4834.0"
-SUPPORTED_ASAR_SHA256 = "2bd5b96a48232f3ccf3df6be50965920699ea3a1b4512dcdd770e209fd1f009e"
+SUPPORTED_PACKAGE_VERSION = "26.908.9136.0"
+SUPPORTED_ASAR_SHA256 = "7a46bd6fe162050afbac27d7d5271d19524e887fa0cdd06c0f2d3fa9b606a31d"
 SUPPORTED_PACKAGE_NAME = "OpenAI.Codex"
 DEFAULT_STATE_ROOT = Path.home() / ".codex-mux"
 ASAR_UNPACK_DIRECTORIES = "node_modules/{@worklouder,better-sqlite3,node-mac-permissions,node-pty,objc-js}"
@@ -156,8 +156,7 @@ def patch_bootstrap(extracted: Path) -> Path:
     failure = "await i.startUpdaterAfterStartupFailure()"
     if data.count(initialize) != 1 or data.count(failure) != 1:
         raise RuntimeError("could not verify exact updater startup anchors")
-    data = data.replace(initialize, "await Promise.resolve()", 1)
-    data = data.replace(failure, "await Promise.resolve()", 1)
+    # Preserve the official updater so Codex update checks and notifications run.
     path.write_text(data, encoding="utf-8")
     return path
 

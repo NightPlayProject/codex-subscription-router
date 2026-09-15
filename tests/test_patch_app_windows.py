@@ -52,9 +52,9 @@ class WindowsPatcherTests(unittest.TestCase):
             self.assertIn("process.platform===`win32`", data)
             self.assertIn("r.LOCALAPPDATA?.trim()", data)
             self.assertIn("`Codex Subscription Router`,`User Data`", data)
-            self.assertNotIn("await i.initialize()", data)
-            self.assertNotIn("await i.startUpdaterAfterStartupFailure()", data)
-            self.assertEqual(data.count("await Promise.resolve()"), 2)
+            self.assertIn("await i.initialize()", data)
+            self.assertIn("await i.startUpdaterAfterStartupFailure()", data)
+            self.assertNotIn("await Promise.resolve()", data)
 
             bootstrap.write_text(
                 "function w({appDataPath:e,buildFlavor:n,env:r}){let i=r.CODEX_ELECTRON_USER_DATA_PATH?.trim();"

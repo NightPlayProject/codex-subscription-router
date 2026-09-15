@@ -5,6 +5,12 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Support Windows Codex `26.908.9136.0` with its verified ASAR hash and patch anchors.
+- Preserve official Windows updater initialization and startup-failure recovery
+  instead of suppressing Codex update checks and notifications.
+
 ### Added
 
 - One-command installer with safe source updates, prerequisite checks, signed
