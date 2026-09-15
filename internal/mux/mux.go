@@ -80,8 +80,12 @@ type Multiplexer struct {
 	threadRouteLocks    map[string]*sync.Mutex
 	threadModelMu       sync.RWMutex
 	threadModelFamilies map[string]bool
+	threadOwnerMu       sync.RWMutex
+	threadOwnerCache    map[string]string
 	migrationMu         sync.RWMutex
 	migrating           map[string]bool
+	migrationCacheMu    sync.RWMutex
+	migrationCache      map[string]time.Time
 	batchMu             sync.Mutex
 	batchStatus         RoutingStatus
 	batchGeneration     uint64
@@ -120,6 +124,7 @@ func New(options Options) (*Multiplexer, error) {
 		events:               make(map[chan Event]struct{}),
 		threadRouteLocks:     make(map[string]*sync.Mutex),
 		threadModelFamilies:  make(map[string]bool),
+		threadOwnerCache:     make(map[string]string),
 		profileClient:        &http.Client{Timeout: 10 * time.Second},
 		profileCache:         make(map[string]profileCacheEntry),
 		now:                  time.Now,
@@ -284,7 +289,7 @@ func (m *Multiplexer) routeExistingRequest(message protocol.Message) {
 	}
 	threadID := threadIDFromParams(message.Params)
 	if threadID != "" {
-		accountID, _ = m.store.ThreadOwner(threadID)
+		accountID, _ = m.cachedThreadOwner(threadID)
 	}
 	if accountID == "" {
 		if controller, ok := m.store.Controller(); ok {
@@ -412,7 +417,7 @@ func (m *Multiplexer) routeTurnStart(message protocol.Message, threadID, ownerID
 
 	// Re-read ownership after taking the per-thread lock. Another turn may have
 	// migrated the thread while this request was waiting.
-	if currentOwnerID, ok := m.store.ThreadOwner(threadID); ok {
+	if currentOwnerID, ok := m.cachedThreadOwner(threadID); ok {
 		ownerID = currentOwnerID
 	}
 	if preferred, ok := m.preferredThreadAccount(ownerID); ok {
@@ -589,12 +594,16 @@ func (m *Multiplexer) moveThreadToAccountWithResume(
 	if sourceAccountID == targetAccountID {
 		return nil
 	}
+	if m.hasRecentMigration(threadID, targetAccountID) {
+		return nil
+	}
 	if err := resume(ctx, threadID, sourceAccountID, targetAccountID); err != nil {
 		return err
 	}
 	if err := m.store.SetThreadOwner(threadID, targetAccountID); err != nil {
 		return fmt.Errorf("persist chat subscription: %w", err)
 	}
+	m.markMigrationComplete(threadID, targetAccountID)
 	return nil
 }
 
@@ -630,7 +639,7 @@ func (m *Multiplexer) resumeThreadOnAccountWithOptions(ctx context.Context, thre
 	if !ok {
 		return fmt.Errorf("target subscription is unavailable")
 	}
-	if err := refreshSignedInSubscription(ctx, target); err != nil {
+	if err := m.refreshSubscriptionFast(ctx, targetAccountID, target); err != nil {
 		return err
 	}
 	return resumeThreadBetweenAccountsWithOptions(
@@ -732,6 +741,7 @@ func (m *Multiplexer) handleInbound(inbound backend.Inbound) {
 	if message.Method == "thread/started" {
 		if threadID := threadIDFromNotification(message.Params); threadID != "" {
 			_ = m.store.LearnThreadOwner(threadID, inbound.AccountID)
+			m.cacheThreadOwner(threadID, inbound.AccountID)
 		}
 	}
 	if message.Method == "turn/completed" {
@@ -813,6 +823,7 @@ func (m *Multiplexer) learnThreadOwner(route externalRoute, accountID string, re
 		if threadID := threadIDFromResult(result); threadID != "" {
 			m.rememberThreadModelFamily(threadID, route.chatGPTWeb)
 			_ = m.store.LearnThreadOwner(threadID, accountID)
+			m.cacheThreadOwner(threadID, accountID)
 		}
 	}
 }
