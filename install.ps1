@@ -155,6 +155,7 @@ foreach ($notice in @('LICENSE', 'UPSTREAM.md')) {
 }
 Copy-Item -LiteralPath (Join-Path $ProjectRoot 'windows\identity.ps1') -Destination (Join-Path $Destination 'wallpapers\windows\identity.ps1')
 Copy-Item -LiteralPath (Join-Path $ProjectRoot 'windows\Wallpapers.ps1') -Destination $Destination
+Copy-Item -LiteralPath (Join-Path $ProjectRoot 'VERSION') -Destination (Join-Path $Destination 'VERSION') -Force
 $revision = (& git.exe -C $ProjectRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $revision -cnotmatch '^[a-f0-9]{40}$') { throw 'Could not identify the installed source revision.' }
 @{

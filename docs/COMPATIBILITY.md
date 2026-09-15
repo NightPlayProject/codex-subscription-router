@@ -19,6 +19,11 @@ default; `--allow-untested-source` is an explicit diagnostic override. Never
 weaken an anchor-count or binary-constant check merely to make a new build
 complete. Review the upstream change and update the patch deliberately.
 
+## Release 0.1.1
+
+The Windows updater recovery and release-revision checks in this release were
+validated with the following staging target.
+
 ## Windows x64 staging target
 
 | Component | Tested value |

@@ -5,6 +5,18 @@ this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-15
+
+### Fixed
+
+- Recover the installed router identity from `build-info.json`, the launcher
+  configuration, and legacy install paths so Check for updates remains usable.
+- Display the installed router version from `routerVersion` when the optional
+  `VERSION` sidecar is absent.
+- Resolve GitHub releases whose API metadata names a tag or branch instead of
+  an exact commit, then pin the verified commit for the queued update.
+- Copy the source `VERSION` sidecar into new Windows installs.
+
 ### Fixed
 
 - Support Windows Codex `26.908.9136.0` with its verified ASAR hash and patch anchors.
@@ -36,7 +48,8 @@ this project uses [Semantic Versioning](https://semver.org/).
 - Loopback-only, token-authenticated diagnostic UI states.
 - Source-only CI, draft release automation, security documentation, and smoke tests.
 
-[Unreleased]: https://github.com/b-nnett/codex-subscription-router/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/b-nnett/codex-subscription-router/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/b-nnett/codex-subscription-router/releases/tag/v0.1.1
 [0.1.0]: https://github.com/b-nnett/codex-subscription-router/releases/tag/v0.1.0
 
 ## Windows history, goal routing, and window isolation

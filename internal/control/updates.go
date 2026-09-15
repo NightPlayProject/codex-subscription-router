@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -26,12 +28,14 @@ type updateStatus struct {
 }
 type updateManager struct {
 	mu        sync.Mutex
+	root      string
 	current   string
 	data      string
 	checked   time.Time
 	status    updateStatus
 	client    *http.Client
 	url       string
+	commitURL string
 	branchURL string
 }
 
@@ -39,57 +43,105 @@ func newUpdateManager() *updateManager {
 	m := &updateManager{
 		client:    &http.Client{Timeout: 8 * time.Second},
 		url:       "https://api.github.com/repos/NightPlayProject/codex-subscription-router/releases/latest",
+		commitURL: "https://api.github.com/repos/NightPlayProject/codex-subscription-router/commits/",
 		branchURL: "https://api.github.com/repos/NightPlayProject/codex-subscription-router/commits/main",
 	}
-	root := os.Getenv("CODEX_ROUTER_INSTALL_ROOT")
+	root := resolveInstallRoot()
 	local := os.Getenv("LOCALAPPDATA")
-	// Keep the visible version available even when build-info.json is missing.
-	// Older installations can have a valid staged VERSION file before the
-	// revision metadata migration has completed.
-	if root == "" {
-		if exe, err := os.Executable(); err == nil {
-			root = filepath.Clean(filepath.Join(filepath.Dir(exe), "..", ".."))
+	if root == "" || local == "" {
+		return m
+	}
+	m.root = root
+	m.data = filepath.Join(local, "Codex Subscription Router")
+	// build-info.json is the install identity. The routerVersion field is
+	// present in current installs, while VERSION/package.json cover older and
+	// development layouts that do not have the sidecar.
+	raw, err := os.ReadFile(filepath.Join(root, "build-info.json"))
+	var info struct {
+		Revision      string `json:"revision"`
+		RouterVersion string `json:"routerVersion"`
+	}
+	if err == nil && json.Unmarshal(raw, &info) == nil {
+		if revisionPattern.MatchString(info.Revision) {
+			m.current = info.Revision
+		}
+		m.status.Version = strings.TrimSpace(info.RouterVersion)
+	}
+	if m.status.Version == "" {
+		if versionRaw, versionErr := os.ReadFile(filepath.Join(root, "VERSION")); versionErr == nil {
+			m.status.Version = strings.TrimSpace(string(versionRaw))
 		}
 	}
 	if m.status.Version == "" {
-		// Development checkouts and older staged installs do not always carry the
-		// VERSION sidecar. Keep the UI useful by exposing the application version
-		// from the bundled package metadata path when available.
-		if packageRaw, err := os.ReadFile(filepath.Join(root, "package.json")); err == nil {
+		if packageRaw, packageErr := os.ReadFile(filepath.Join(root, "package.json")); packageErr == nil {
 			var packageInfo struct {
 				Version string `json:"version"`
 			}
 			if json.Unmarshal(packageRaw, &packageInfo) == nil {
-				m.status.Version = packageInfo.Version
+				m.status.Version = strings.TrimSpace(packageInfo.Version)
 			}
 		}
 	}
-	if root != "" {
-		if versionRaw, err := os.ReadFile(filepath.Join(root, "VERSION")); err == nil {
-			m.status.Version = string(versionRaw)
-		}
-	}
-	if root == "" || local == "" {
-		return m
-	}
-	raw, err := os.ReadFile(filepath.Join(root, "build-info.json"))
-	if err != nil {
-		return m
-	}
-	var info struct {
-		Revision string `json:"revision"`
-	}
-	if json.Unmarshal(raw, &info) != nil || !revisionPattern.MatchString(info.Revision) {
-		return m
-	}
-	m.current = info.Revision
-	m.data = filepath.Join(local, "Codex Subscription Router")
 	return m
 }
+
+func resolveInstallRoot() string {
+	candidates := make([]string, 0, 8)
+	if configured := strings.TrimSpace(os.Getenv("CODEX_ROUTER_INSTALL_ROOT")); configured != "" {
+		candidates = append(candidates, configured)
+	}
+	if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
+		launcherConfig := filepath.Join(local, "Codex Subscription Router", "Launcher", "install.json")
+		if raw, err := os.ReadFile(launcherConfig); err == nil {
+			var config struct {
+				Destination string `json:"destination"`
+			}
+			if json.Unmarshal(raw, &config) == nil && strings.TrimSpace(config.Destination) != "" {
+				candidates = append(candidates, config.Destination)
+			}
+		}
+	}
+	if executable, err := os.Executable(); err == nil {
+		candidate := filepath.Dir(executable)
+		for index := 0; index < 5 && candidate != ""; index++ {
+			candidates = append(candidates, candidate)
+			next := filepath.Dir(candidate)
+			if next == candidate {
+				break
+			}
+			candidate = next
+		}
+	}
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		candidate = filepath.Clean(candidate)
+		if candidate == "." {
+			continue
+		}
+		key := strings.ToLower(candidate)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		if info, err := os.Stat(filepath.Join(candidate, "build-info.json")); err == nil && !info.IsDir() {
+			return candidate
+		}
+		if info, err := os.Stat(filepath.Join(candidate, "Launch-CodexSubscriptionRouter.ps1")); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	// Keep a configured destination even when a legacy install has no metadata;
+	// its update check can still queue the latest verified source revision.
+	if len(candidates) > 0 && strings.TrimSpace(candidates[0]) != "" {
+		return filepath.Clean(candidates[0])
+	}
+	return ""
+}
+
 func (m *updateManager) check(ctx context.Context, force bool) updateStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.current == "" {
+	if m.data == "" {
 		return updateStatus{}
 	}
 	if force || m.checked.IsZero() || time.Since(m.checked) >= time.Hour {
@@ -112,15 +164,12 @@ func (m *updateManager) check(ctx context.Context, force bool) updateStatus {
 						Tag    string `json:"tag_name"`
 					}
 					err = json.NewDecoder(io.LimitReader(res.Body, 1024*1024)).Decode(&release)
-					if release.Target == "" {
-						release.Target = release.SHA
-					}
-					if err == nil && !revisionPattern.MatchString(release.Target) {
-						err = fmt.Errorf("invalid update revision")
+					if err == nil {
+						release.Target, err = m.resolveReleaseRevision(ctx, release.Target, release.SHA, release.Tag)
 					}
 					if err == nil {
 						m.status.Latest = release.Target
-						m.status.Available = release.Target != m.current
+						m.status.Available = m.current == "" || release.Target != m.current
 					}
 				}
 			}
@@ -128,7 +177,7 @@ func (m *updateManager) check(ctx context.Context, force bool) updateStatus {
 		// A release may not exist yet when a new router build has been pushed.
 		// Keep Check for updates useful by falling back to the tracked branch
 		// commit instead of leaving installed users stuck on the previous build.
-		if err != nil || !revisionPattern.MatchString(m.status.Latest) {
+		if m.branchURL != "" && (err != nil || !revisionPattern.MatchString(m.status.Latest)) {
 			req, branchErr := http.NewRequestWithContext(ctx, http.MethodGet, m.branchURL, nil)
 			if branchErr == nil {
 				req.Header.Set("Accept", "application/vnd.github+json")
@@ -143,7 +192,7 @@ func (m *updateManager) check(ctx context.Context, force bool) updateStatus {
 						branchErr = json.NewDecoder(io.LimitReader(res.Body, 1024*1024)).Decode(&branch)
 						if branchErr == nil && revisionPattern.MatchString(branch.SHA) {
 							m.status.Latest = branch.SHA
-							m.status.Available = branch.SHA != m.current
+							m.status.Available = m.current == "" || branch.SHA != m.current
 							err = nil
 						}
 					}
@@ -159,6 +208,42 @@ func (m *updateManager) check(ctx context.Context, force bool) updateStatus {
 	m.status.Queued = err == nil
 	return m.status
 }
+
+func (m *updateManager) resolveReleaseRevision(ctx context.Context, target, sha, tag string) (string, error) {
+	for _, candidate := range []string{target, sha} {
+		if revisionPattern.MatchString(candidate) {
+			return candidate, nil
+		}
+	}
+	if m.commitURL == "" || strings.TrimSpace(tag) == "" {
+		return "", fmt.Errorf("invalid update revision")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.commitURL+url.PathEscape(tag), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "Codex-Subscription-Router")
+	res, err := m.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("release revision lookup returned HTTP %d", res.StatusCode)
+	}
+	var commit struct {
+		SHA string `json:"sha"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 1024*1024)).Decode(&commit); err != nil {
+		return "", err
+	}
+	if !revisionPattern.MatchString(commit.SHA) {
+		return "", fmt.Errorf("invalid update revision")
+	}
+	return commit.SHA, nil
+}
+
 func (m *updateManager) queue() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
