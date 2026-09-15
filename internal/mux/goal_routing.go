@@ -10,30 +10,60 @@ import (
 	"time"
 )
 
-func goalStatus(ctx context.Context, child appServerRequester, id string) (string, error) {
+type threadGoalSnapshot struct {
+	Objective   string `json:"objective"`
+	Status      string `json:"status"`
+	TokenBudget *int64 `json:"tokenBudget"`
+}
+
+func readGoalSnapshot(ctx context.Context, child appServerRequester, id string) (*threadGoalSnapshot, error) {
 	params, _ := json.Marshal(map[string]any{"threadId": id})
 	response, err := child.Request(ctx, "thread/goal/get", params)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	var result struct {
-		Goal *struct {
-			Status string `json:"status"`
-		} `json:"goal"`
+		Goal *threadGoalSnapshot `json:"goal"`
 	}
 	if err = json.Unmarshal(response.Result, &result); err != nil {
+		return nil, err
+	}
+	return result.Goal, nil
+}
+
+func goalStatus(ctx context.Context, child appServerRequester, id string) (string, error) {
+	goal, err := readGoalSnapshot(ctx, child, id)
+	if err != nil {
 		return "", err
 	}
-	if result.Goal == nil {
+	if goal == nil {
 		return "", nil
 	}
-	return result.Goal.Status, nil
+	return goal.Status, nil
 }
+
 func setGoalStatus(ctx context.Context, child appServerRequester, id, status string) error {
 	params, _ := json.Marshal(map[string]any{"threadId": id, "status": status})
 	_, err := child.Request(ctx, "thread/goal/set", params)
 	return err
 }
+
+func restoreGoalSnapshot(ctx context.Context, child appServerRequester, id string, goal *threadGoalSnapshot, status string) error {
+	params, _ := json.Marshal(struct {
+		ThreadID    string `json:"threadId"`
+		Objective   string `json:"objective"`
+		Status      string `json:"status"`
+		TokenBudget *int64 `json:"tokenBudget"`
+	}{
+		ThreadID:    id,
+		Objective:   goal.Objective,
+		Status:      status,
+		TokenBudget: goal.TokenBudget,
+	})
+	_, err := child.Request(ctx, "thread/goal/set", params)
+	return err
+}
+
 func (m *Multiplexer) moveThreadWithGoal(ctx context.Context, id, sourceID, targetID string) error {
 	return m.moveThreadWithGoalOptions(ctx, id, sourceID, targetID, false)
 }
@@ -61,13 +91,17 @@ func (m *Multiplexer) moveThreadWithGoalMigrationOptions(ctx context.Context, id
 	if !ok {
 		return fmt.Errorf("source metadata unavailable")
 	}
-	status := ""
+	var goal *threadGoalSnapshot
 	if _, err := os.Stat(filepath.Join(account.CodexHome, "goals_1.sqlite")); err == nil {
 		var readErr error
-		status, readErr = goalStatus(ctx, source, id)
+		goal, readErr = readGoalSnapshot(ctx, source, id)
 		if readErr != nil {
 			return readErr
 		}
+	}
+	status := ""
+	if goal != nil {
+		status = goal.Status
 	}
 	resumeGoal := status == "active" || status == "usageLimited"
 	if status == "active" {
@@ -92,7 +126,11 @@ func (m *Multiplexer) moveThreadWithGoalMigrationOptions(ctx context.Context, id
 		return err
 	}
 	if resumeGoal {
-		if err := setGoalStatus(ctx, target, id, "active"); err != nil {
+		// Copying goals_1.sqlite preserves counters and history, but a running
+		// app-server keeps scheduler state in memory. Re-submit the complete goal
+		// definition after thread/resume so the target scheduler registers it now
+		// instead of only discovering the copied row after a Codex restart.
+		if err := restoreGoalSnapshot(ctx, target, id, goal, "active"); err != nil {
 			return fmt.Errorf("chat moved but goal remains paused: %w", err)
 		}
 	}
