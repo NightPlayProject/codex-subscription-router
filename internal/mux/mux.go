@@ -295,7 +295,7 @@ func (m *Multiplexer) routeExistingRequest(message protocol.Message) {
 		m.write(protocol.Failure(message.ID, -32022, "no controller account is configured"))
 		return
 	}
-	if threadID != "" && m.requestUsesChatGPTWeb(message, threadID, accountID) {
+	if threadID != "" && m.keepChatGPTWebThreadOnCurrentAccount(message, threadID, accountID) {
 		if err := m.forward(accountID, message); err != nil {
 			m.write(protocol.Failure(message.ID, -32023, err.Error()))
 		}
@@ -315,7 +315,7 @@ func (m *Multiplexer) routeExistingRequest(message protocol.Message) {
 			if message.Method == "thread/resume" {
 				if preferred, ok := m.preferredThreadAccount(accountID); ok {
 					ctx, cancel := context.WithTimeout(context.Background(), 2*requestTimeout)
-					err := m.moveThreadToAccountForRequest(ctx, threadID, accountID, preferred.ID, message)
+					err := m.moveThreadToAccountForRequestWithOptions(ctx, threadID, accountID, preferred.ID, message, true)
 					cancel()
 					if err != nil && !errors.Is(err, errChatActive) {
 						m.publish(Event{
@@ -470,6 +470,18 @@ func (m *Multiplexer) preferredThreadAccount(ownerID string) (state.Account, boo
 	return account, true
 }
 
+func (m *Multiplexer) keepChatGPTWebThreadOnCurrentAccount(message protocol.Message, threadID, ownerID string) bool {
+	if !m.requestUsesChatGPTWeb(message, threadID, ownerID) {
+		return false
+	}
+	if message.Method == "thread/resume" {
+		if _, ok := m.preferredThreadAccount(ownerID); ok {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *Multiplexer) lockThreadRoute(threadID string) func() {
 	m.threadRouteMu.Lock()
 	if m.threadRouteLocks == nil {
@@ -525,7 +537,18 @@ func (m *Multiplexer) moveThreadToAccountForRequest(
 	targetAccountID string,
 	message protocol.Message,
 ) error {
-	return m.moveThreadToAccountForRequestWithTransition(ctx, threadID, sourceAccountID, targetAccountID, message, false)
+	return m.moveThreadToAccountForRequestWithOptions(ctx, threadID, sourceAccountID, targetAccountID, message, false)
+}
+
+func (m *Multiplexer) moveThreadToAccountForRequestWithOptions(
+	ctx context.Context,
+	threadID string,
+	sourceAccountID string,
+	targetAccountID string,
+	message protocol.Message,
+	manualResume bool,
+) error {
+	return m.moveThreadToAccountForRequestWithTransitionOptions(ctx, threadID, sourceAccountID, targetAccountID, message, false, manualResume)
 }
 
 func (m *Multiplexer) moveThreadToAccountForRequestWithTransition(
@@ -536,10 +559,24 @@ func (m *Multiplexer) moveThreadToAccountForRequestWithTransition(
 	message protocol.Message,
 	waitForSourceIdle bool,
 ) error {
-	if requestExplicitlyUsesNativeModel(message) {
-		return m.moveThreadWithGoalMigrationOptions(ctx, threadID, sourceAccountID, targetAccountID, true, waitForSourceIdle)
-	}
-	return m.moveThreadWithGoalMigrationOptions(ctx, threadID, sourceAccountID, targetAccountID, false, waitForSourceIdle)
+	return m.moveThreadToAccountForRequestWithTransitionOptions(ctx, threadID, sourceAccountID, targetAccountID, message, waitForSourceIdle, false)
+}
+
+func (m *Multiplexer) moveThreadToAccountForRequestWithTransitionOptions(
+	ctx context.Context,
+	threadID string,
+	sourceAccountID string,
+	targetAccountID string,
+	message protocol.Message,
+	waitForSourceIdle bool,
+	manualResume bool,
+) error {
+	allowChatGPTWebSource := requestAllowsChatGPTWebSourceMigration(message, manualResume)
+	return m.moveThreadWithGoalMigrationOptions(ctx, threadID, sourceAccountID, targetAccountID, allowChatGPTWebSource, waitForSourceIdle)
+}
+
+func requestAllowsChatGPTWebSourceMigration(message protocol.Message, manualResume bool) bool {
+	return requestExplicitlyUsesNativeModel(message) || (manualResume && message.Method == "thread/resume")
 }
 
 func (m *Multiplexer) moveThreadToAccountWithResume(

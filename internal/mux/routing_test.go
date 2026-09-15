@@ -44,6 +44,54 @@ func TestPreferredThreadAccountAppliesOnlyExplicitEnabledSelection(t *testing.T)
 	}
 }
 
+func TestManualPreferredResumeCanLeaveWebThreadStickiness(t *testing.T) {
+	root := t.TempDir()
+	store, err := state.Open(filepath.Join(root, "mux"), filepath.Join(root, "primary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondary, err := store.AddAccount("Subscription 2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	threadID := "web-chat"
+	mux := &Multiplexer{
+		store:               store,
+		threadModelFamilies: map[string]bool{threadID: true},
+	}
+	resume := protocol.Message{Method: "thread/resume", Params: json.RawMessage(`{"threadId":"web-chat"}`)}
+	if !mux.keepChatGPTWebThreadOnCurrentAccount(resume, threadID, "primary") {
+		t.Fatal("automatic routing must keep a Web thread on its current account")
+	}
+	if err := store.SetPreferredNewThreadAccountID(secondary.ID); err != nil {
+		t.Fatal(err)
+	}
+	if mux.keepChatGPTWebThreadOnCurrentAccount(resume, threadID, "primary") {
+		t.Fatal("explicit subscription selection must let thread/resume reach migration")
+	}
+	read := protocol.Message{Method: "thread/read", Params: json.RawMessage(`{"threadId":"web-chat"}`)}
+	if !mux.keepChatGPTWebThreadOnCurrentAccount(read, threadID, "primary") {
+		t.Fatal("manual selection must not weaken Web stickiness for unrelated requests")
+	}
+}
+
+func TestManualResumeIsOnlyImplicitWebMigrationAllowance(t *testing.T) {
+	webResume := protocol.Message{Method: "thread/resume", Params: json.RawMessage(`{"threadId":"web-chat"}`)}
+	if requestExplicitlyUsesNativeModel(webResume) {
+		t.Fatal("resume without a model must not look like an explicit native model request")
+	}
+	if !requestAllowsChatGPTWebSourceMigration(webResume, true) {
+		t.Fatal("manual thread/resume must allow Web source history migration")
+	}
+	if requestAllowsChatGPTWebSourceMigration(webResume, false) {
+		t.Fatal("automatic thread/resume must preserve Web source isolation")
+	}
+	read := protocol.Message{Method: "thread/read", Params: json.RawMessage(`{"threadId":"web-chat"}`)}
+	if requestAllowsChatGPTWebSourceMigration(read, true) {
+		t.Fatal("manual preference must not allow Web source migration for unrelated requests")
+	}
+}
+
 func TestIsUsageLimitResponseRecognizesStructuredError(t *testing.T) {
 	message := protocol.Message{Error: &protocol.RPCError{
 		Code:    -32000,
