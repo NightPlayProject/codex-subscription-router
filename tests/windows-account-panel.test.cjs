@@ -140,9 +140,12 @@ test('chat selection leaves the plugin account unchanged after server success', 
   ui.state.accounts[1].connected = true; await ui.state.poll();
   ui.context.__codexMuxPluginAccountId = 'primary';
   const select = ui.all().find(item => item.attributes['aria-label'] === 'Subscription for all chats');
+  const readsBefore = ui.state.calls.filter(([route, method]) => (route === '/accounts' || route === '/routing-preference') && method === 'GET').length;
   select.value = 'new-account'; select.events.change(); await settle();
   assert.equal(ui.context.__codexMuxPluginAccountId, 'primary');
   assert(ui.state.calls.some(([route, method]) => route === '/routing-preference' && method === 'PUT'));
+  const readsAfter = ui.state.calls.filter(([route, method]) => (route === '/accounts' || route === '/routing-preference') && method === 'GET').length;
+  assert.equal(readsAfter, readsBefore, 'successful routing change performed a redundant full refresh');
 });
 
 test('failed subscription refresh keeps previous plugin selection and shows the error', async () => {
@@ -209,7 +212,7 @@ test('outside pointer closes panel while inside pointer leaves it open', async (
   assert.equal(ui.button('Subscriptions').attributes['aria-expanded'], 'false');
 });
 
-test('history loading is indeterminate and preparation progress counts checked chats', async () => {
+test('open-chat preparation is indeterminate while migrating and counts background work', async () => {
  const ui = await setup();
  ui.state.preparation = {running:true,total:10,ready:2,deferred:3,failed:1};
  ui.button('Refresh').events.click(); await settle();
@@ -219,7 +222,8 @@ test('history loading is indeterminate and preparation progress counts checked c
  await ui.state.poll();
  bar=ui.all().find(item => item.tag === 'progress');
  assert.equal(bar.value,undefined);
- assert.equal(bar.attributes['aria-label'],'Loading chat history…');
+ assert.equal(bar.attributes['aria-label'],'Preparing open chats…');
+ assert(ui.all().some(item => item.textContent?.includes('Closed chats switch automatically when opened.')));
 });
 
 
@@ -235,7 +239,7 @@ test('open dropdown survives polling and update completion until blur', async ()
   select.events.blur();
   await new Promise(resolve => setTimeout(resolve, 5));
   assert(!ui.all().includes(select));
-  assert(ui.all().some(item => item.textContent === 'Preparing chats'));
+  assert(ui.all().some(item => item.textContent === 'Preparing open chats'));
 });
 
 test('dropdown selection commits while background render is pending', async () => {

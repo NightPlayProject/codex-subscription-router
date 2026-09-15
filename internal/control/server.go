@@ -215,7 +215,10 @@ func (s *Server) routingPreference(response http.ResponseWriter, request *http.R
 			return
 		}
 		s.mux.PrepareExistingChats(input.AccountID)
-		writeJSON(response, http.StatusOK, map[string]any{"accountId": s.mux.PreferredNewThreadAccountID()})
+		writeJSON(response, http.StatusOK, map[string]any{
+			"accountId":   s.mux.PreferredNewThreadAccountID(),
+			"preparation": s.mux.RoutingStatus(),
+		})
 	default:
 		methodNotAllowed(response)
 	}

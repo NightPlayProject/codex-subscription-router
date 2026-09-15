@@ -103,7 +103,7 @@ func TestOldAccountCloseAfterMigrationDoesNotCloseCurrentChat(t *testing.T) {
 	}
 }
 
-func TestPreparationIncludesEveryKnownChatAndAutomaticClearsProgress(t *testing.T) {
+func TestPreparationSkipsColdChatsAndAutomaticClearsProgress(t *testing.T) {
 	store, err := state.Open(filepath.Join(t.TempDir(), "mux"), filepath.Join(t.TempDir(), "primary"))
 	if err != nil {
 		t.Fatal(err)
@@ -127,12 +127,31 @@ func TestPreparationIncludesEveryKnownChatAndAutomaticClearsProgress(t *testing.
 		time.Sleep(time.Millisecond)
 	}
 	status := m.RoutingStatus()
-	// An unavailable child is deferred, never counted as successfully migrated.
-	if status.Running || status.Total != 3 || status.Deferred != 3 || status.Ready != 0 {
-		t.Fatalf("incorrect global preparation status: %+v", status)
+	if status.Running || status.Total != 0 || status.Deferred != 0 || status.Ready != 0 || status.Failed != 0 {
+		t.Fatalf("cold chats should not be bulk preparation work: %+v", status)
 	}
 	m.PrepareExistingChats("")
 	if status := m.RoutingStatus(); status != (RoutingStatus{}) {
 		t.Fatalf("Automatic retained stale progress: %+v", status)
+	}
+}
+
+func TestPreparationCandidatesIncludeOnlyLoadedNativeChats(t *testing.T) {
+	owners := map[string]string{
+		"loaded-native":  "primary",
+		"loaded-web":     "primary",
+		"cold-native":    "primary",
+		"already-target": "secondary",
+	}
+	loaded := map[string][]string{
+		"primary":   {"loaded-native", "loaded-web", "unknown", "loaded-native"},
+		"secondary": {"already-target"},
+	}
+	isWebThread := func(threadID, sourceAccountID string) bool {
+		return threadID == "loaded-web" && sourceAccountID == "primary"
+	}
+	candidates := preparationCandidates("secondary", owners, loaded, isWebThread)
+	if len(candidates) != 1 || candidates[0].threadID != "loaded-native" || candidates[0].sourceAccountID != "primary" {
+		t.Fatalf("unexpected preparation candidates: %+v", candidates)
 	}
 }

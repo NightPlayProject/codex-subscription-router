@@ -438,13 +438,13 @@
 		  body: JSON.stringify({ accountId: routingSelect.value || "" }),
 		});
 		preferredNewThreadAccountId = updated.accountId || "";
-		await refresh();
+		preparation = updated.preparation || {};
 	  }); });
 	  panel.append(routingLabel, routingSelect);
 	  const routingHelp = document.createElement("div");
 	  routingHelp.className = "cmx-muted";
 	  routingHelp.style.marginTop = "6px";
-	  routingHelp.textContent = "Applies to every new and existing chat. Running replies finish first. ChatGPT Web models use the account signed in to ChatGPT Web.";
+	  routingHelp.textContent = "Routing updates immediately for every chat. Open chats are prepared in the background; closed chats switch automatically when opened. Running replies finish first. ChatGPT Web models use the account signed in to ChatGPT Web.";
 	  panel.appendChild(routingHelp);
       if (preparation.loading || preparation.running || preparation.total) {
         const card = document.createElement("div");
@@ -452,7 +452,7 @@
         const heading = document.createElement("div");
         heading.className = "cmx-history-head";
         const label = document.createElement("span");
-        label.textContent = preparation.loading ? "Loading chat history" : preparation.running ? "Preparing chats" : "Chat readiness";
+        label.textContent = preparation.loading || preparation.running ? "Preparing open chats" : "Open chats ready";
         const count = document.createElement("strong");
         count.textContent = `${preparation.ready || 0} ready`;
         heading.append(label, count);
@@ -460,7 +460,7 @@
         if (preparation.loading || preparation.running) {
           const bar = document.createElement("progress");
           bar.className = "cmx-history-progress";
-          bar.setAttribute("aria-label", preparation.loading ? "Loading chat history…" : "Checking existing chats…");
+          bar.setAttribute("aria-label", "Preparing open chats…");
           if (!preparation.loading && preparation.total) {
             bar.max = preparation.total;
             bar.value = (preparation.ready || 0) + (preparation.deferred || 0) + (preparation.failed || 0);
@@ -470,9 +470,9 @@
         const detail = document.createElement("div");
         detail.className = "cmx-muted";
         detail.setAttribute("role", "status");
-        detail.textContent = preparation.loading ? "Finding your saved conversations…"
-          : preparation.running ? `Checking ${preparation.total || 0} chats. You can keep working.`
-          : `${preparation.ready || 0} chats ready${preparation.deferred ? ` · ${preparation.deferred} switch when reopened or after their reply` : ""}`;
+        detail.textContent = preparation.loading || preparation.running
+		  ? `Updating ${preparation.total || 0} open chats in the background. Closed chats switch automatically when opened.`
+		  : `${preparation.ready || 0} open chats ready${preparation.deferred ? ` · ${preparation.deferred} switch after their current reply` : ""}. Closed chats switch automatically when opened.`;
         card.appendChild(detail);
         if (preparation.failed) {
           const failure = document.createElement("details");
