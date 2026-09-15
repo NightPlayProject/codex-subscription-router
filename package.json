@@ -19,10 +19,10 @@
     "check": "npm run check:go && npm run check:js && npm run check:python && npm run check:shell",
     "check:go": "go test ./... && go vet ./...",
     "check:js": "node --check ui/account-menu.js && node --check ui/thread-subscription.js && node --check ui/ui-test-bridge.cjs && node --check ui/windows-account-panel.js",
-    "check:python": "python3 -m py_compile scripts/patch_app.py scripts/patch_app_windows.py scripts/check_release.py tests/test_patch_app_windows.py",
+    "check:python": "python -m py_compile scripts/patch_app.py scripts/patch_app_windows.py scripts/check_release.py tests/test_patch_app_windows.py",
     "check:shell": "bash -n install.sh",
     "check:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_windows.ps1",
-    "release:check": "python3 scripts/check_release.py"
+    "release:check": "python scripts/check_release.py"
   },
   "devDependencies": {
     "@electron/asar": "4.2.1"
