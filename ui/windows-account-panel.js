@@ -204,7 +204,7 @@
 	  preparation = routing.preparation || {};
       const current = globalThis.__codexMuxPluginAccountId;
       if (!current || !accounts.some((account) => account.id === current && account.enabled && account.connected)) {
-        globalThis.__codexMuxPluginAccountId = accounts.find(a => a.id === preferredNewThreadAccountId && a.enabled && a.connected)?.id || accounts.find((account) => account.enabled && account.connected)?.id || null;
+        globalThis.__codexMuxPluginAccountId = accounts.find(a => a.controller && a.enabled && a.connected)?.id || accounts.find((account) => account.enabled && account.connected)?.id || null;
       }
       error = "";
       render();
@@ -438,7 +438,6 @@
 		  body: JSON.stringify({ accountId: routingSelect.value || "" }),
 		});
 		preferredNewThreadAccountId = updated.accountId || "";
-		globalThis.__codexMuxPluginAccountId = preferredNewThreadAccountId || accounts.find(a => a.controller && a.connected)?.id || null;
 		await refresh();
 	  }); });
 	  panel.append(routingLabel, routingSelect);

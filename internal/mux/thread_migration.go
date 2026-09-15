@@ -33,6 +33,10 @@ type appServerRequester interface {
 	Request(context.Context, string, json.RawMessage) (protocol.Message, error)
 }
 
+type threadMigrationOptions struct {
+	allowChatGPTWebSource bool
+}
+
 func resumeThreadBetweenAccounts(
 	ctx context.Context,
 	threadID string,
@@ -41,16 +45,38 @@ func resumeThreadBetweenAccounts(
 	source appServerRequester,
 	target appServerRequester,
 ) error {
+	return resumeThreadBetweenAccountsWithOptions(
+		ctx,
+		threadID,
+		sourceHome,
+		targetHome,
+		source,
+		target,
+		threadMigrationOptions{},
+	)
+}
+
+func resumeThreadBetweenAccountsWithOptions(
+	ctx context.Context,
+	threadID string,
+	sourceHome string,
+	targetHome string,
+	source appServerRequester,
+	target appServerRequester,
+	options threadMigrationOptions,
+) error {
 	readParams, _ := json.Marshal(map[string]any{"threadId": threadID, "includeTurns": false})
 	readResponse, err := source.Request(ctx, "thread/read", readParams)
 	var sourcePath string
 	var sourceCWD string
 	var sourceModelProvider string
+	var sourceModel string
 	var readResult struct {
 		Thread struct {
 			ID            string `json:"id"`
 			Path          string `json:"path"`
 			CWD           string `json:"cwd"`
+			Model         string `json:"model"`
 			ModelProvider string `json:"modelProvider"`
 			Status        struct {
 				Type string `json:"type"`
@@ -69,6 +95,7 @@ func resumeThreadBetweenAccounts(
 		}
 		sourcePath = readResult.Thread.Path
 		sourceCWD = readResult.Thread.CWD
+		sourceModel = readResult.Thread.Model
 		sourceModelProvider = readResult.Thread.ModelProvider
 	} else {
 		if !strings.Contains(strings.ToLower(err.Error()), "thread not loaded") {
@@ -83,6 +110,14 @@ func resumeThreadBetweenAccounts(
 		if fallbackErr != nil {
 			return fmt.Errorf("read existing chat: %w; disk history fallback: %v", err, fallbackErr)
 		}
+	}
+	if sourceModel == "" {
+		if model, modelErr := latestThreadModelFromRollout(sourcePath); modelErr == nil {
+			sourceModel = model
+		}
+	}
+	if isChatGPTWebModel(sourceModel) && !options.allowChatGPTWebSource {
+		return errChatGPTWebThread
 	}
 	if err := ensureThreadUnloaded(ctx, target, threadID); err != nil {
 		return fmt.Errorf("prepare target chat: %w", err)

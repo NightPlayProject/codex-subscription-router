@@ -35,8 +35,15 @@ func setGoalStatus(ctx context.Context, child appServerRequester, id, status str
 	return err
 }
 func (m *Multiplexer) moveThreadWithGoal(ctx context.Context, id, sourceID, targetID string) error {
+	return m.moveThreadWithGoalOptions(ctx, id, sourceID, targetID, false)
+}
+
+func (m *Multiplexer) moveThreadWithGoalOptions(ctx context.Context, id, sourceID, targetID string, allowChatGPTWebSource bool) error {
 	if sourceID == targetID {
 		return nil
+	}
+	if m.threadUsesChatGPTWeb(id, sourceID) && !allowChatGPTWebSource {
+		return errChatGPTWebThread
 	}
 	source, ok := m.child(sourceID)
 	if !ok {
@@ -64,7 +71,11 @@ func (m *Multiplexer) moveThreadWithGoal(ctx context.Context, id, sourceID, targ
 			return err
 		}
 	}
-	err := m.moveThreadToAccountWithResume(ctx, id, sourceID, targetID, m.resumeThreadOnAccount)
+	resume := m.resumeThreadOnAccount
+	if allowChatGPTWebSource {
+		resume = m.resumeThreadOnAccountAllowChatGPTWebSource
+	}
+	err := m.moveThreadToAccountWithResume(ctx, id, sourceID, targetID, resume)
 	if err != nil {
 		if status == "active" {
 			if restoreErr := setGoalStatus(ctx, source, id, "active"); restoreErr != nil {
@@ -83,6 +94,9 @@ func (m *Multiplexer) moveThreadWithGoal(ctx context.Context, id, sourceID, targ
 
 // Goal continuations originate inside app-server and do not send turn/start.
 func (m *Multiplexer) routeLimitedGoal(accountID, id string) bool {
+	if m.threadUsesChatGPTWeb(id, accountID) {
+		return false
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*requestTimeout)
 	defer cancel()
 	unlock := m.lockThreadRoute(id)
@@ -130,6 +144,9 @@ func (m *Multiplexer) routeLimitedGoal(accountID, id string) bool {
 // Apply a manual selection at a turn boundary, including autonomous goal turns.
 func (m *Multiplexer) routeGoalAtTurnBoundary(accountID, id string) {
 	if id == "" {
+		return
+	}
+	if m.threadUsesChatGPTWeb(id, accountID) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*requestTimeout)

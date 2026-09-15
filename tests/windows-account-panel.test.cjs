@@ -134,13 +134,14 @@ test('device code clears after a successful background sign-in refresh', async (
   assert(!ui.all().some(item => item.textContent === 'TEST-CODE'));
 });
 
-test('chat selection also selects the plugin account after server success', async () => {
+test('chat selection leaves the plugin account unchanged after server success', async () => {
   const ui = await setup();
   ui.button('Add subscription').events.click(); await settle();
   ui.state.accounts[1].connected = true; await ui.state.poll();
+  ui.context.__codexMuxPluginAccountId = 'primary';
   const select = ui.all().find(item => item.attributes['aria-label'] === 'Subscription for all chats');
   select.value = 'new-account'; select.events.change(); await settle();
-  assert.equal(ui.context.__codexMuxPluginAccountId, 'new-account');
+  assert.equal(ui.context.__codexMuxPluginAccountId, 'primary');
   assert(ui.state.calls.some(([route, method]) => route === '/routing-preference' && method === 'PUT'));
 });
 

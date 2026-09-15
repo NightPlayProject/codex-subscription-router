@@ -30,10 +30,11 @@ type Options struct {
 }
 
 type externalRoute struct {
-	accountID string
-	method    string
-	message   protocol.Message
-	excluded  map[string]struct{}
+	accountID  string
+	method     string
+	message    protocol.Message
+	excluded   map[string]struct{}
+	chatGPTWeb bool
 }
 
 type serverRequestRoute struct {
@@ -75,14 +76,16 @@ type Multiplexer struct {
 	eventsMu sync.RWMutex
 	events   map[chan Event]struct{}
 
-	threadRouteMu    sync.Mutex
-	threadRouteLocks map[string]*sync.Mutex
-	migrationMu      sync.RWMutex
-	migrating        map[string]bool
-	batchMu          sync.Mutex
-	batchStatus      RoutingStatus
-	batchGeneration  uint64
-	goalExclusions   map[string]map[string]time.Time
+	threadRouteMu       sync.Mutex
+	threadRouteLocks    map[string]*sync.Mutex
+	threadModelMu       sync.RWMutex
+	threadModelFamilies map[string]bool
+	migrationMu         sync.RWMutex
+	migrating           map[string]bool
+	batchMu             sync.Mutex
+	batchStatus         RoutingStatus
+	batchGeneration     uint64
+	goalExclusions      map[string]map[string]time.Time
 
 	profileMu     sync.Mutex
 	profileClient *http.Client
@@ -116,6 +119,7 @@ func New(options Options) (*Multiplexer, error) {
 		serverRoutes:         make(map[string]serverRequestRoute),
 		events:               make(map[chan Event]struct{}),
 		threadRouteLocks:     make(map[string]*sync.Mutex),
+		threadModelFamilies:  make(map[string]bool),
 		profileClient:        &http.Client{Timeout: 10 * time.Second},
 		profileCache:         make(map[string]profileCacheEntry),
 		now:                  time.Now,
@@ -233,6 +237,17 @@ func (m *Multiplexer) handleClientNotification(message protocol.Message) {
 }
 
 func (m *Multiplexer) routeNewThread(message protocol.Message) {
+	if m.requestUsesChatGPTWeb(message, "", "") {
+		controller, ok := m.store.Controller()
+		if !ok {
+			m.write(protocol.Failure(message.ID, -32022, "no controller account is configured"))
+			return
+		}
+		if err := m.forward(controller.ID, message); err != nil {
+			m.write(protocol.Failure(message.ID, -32023, err.Error()))
+		}
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
 	account, reason, err := m.chooseAccount(ctx)
@@ -280,6 +295,12 @@ func (m *Multiplexer) routeExistingRequest(message protocol.Message) {
 		m.write(protocol.Failure(message.ID, -32022, "no controller account is configured"))
 		return
 	}
+	if threadID != "" && m.requestUsesChatGPTWeb(message, threadID, accountID) {
+		if err := m.forward(accountID, message); err != nil {
+			m.write(protocol.Failure(message.ID, -32023, err.Error()))
+		}
+		return
+	}
 	if (message.Method == "turn/start" || startsGoal(message)) && threadID != "" {
 		go m.routeTurnStart(message, threadID, accountID)
 		return
@@ -294,7 +315,7 @@ func (m *Multiplexer) routeExistingRequest(message protocol.Message) {
 			if message.Method == "thread/resume" {
 				if preferred, ok := m.preferredThreadAccount(accountID); ok {
 					ctx, cancel := context.WithTimeout(context.Background(), 2*requestTimeout)
-					err := m.moveThreadToAccount(ctx, threadID, accountID, preferred.ID)
+					err := m.moveThreadToAccountForRequest(ctx, threadID, accountID, preferred.ID, message)
 					cancel()
 					if err != nil && !errors.Is(err, errChatActive) {
 						m.publish(Event{
@@ -351,10 +372,11 @@ func (m *Multiplexer) forwardWithExclusions(accountID string, message protocol.M
 	key := protocol.RequestIDKey(message.ID)
 	m.externalMu.Lock()
 	m.externalRoutes[key] = externalRoute{
-		accountID: accountID,
-		method:    message.Method,
-		message:   message,
-		excluded:  cloneAccountSet(excluded),
+		accountID:  accountID,
+		method:     message.Method,
+		message:    message,
+		excluded:   cloneAccountSet(excluded),
+		chatGPTWeb: m.requestUsesChatGPTWeb(message, threadIDFromParams(message.Params), accountID),
 	}
 	m.externalMu.Unlock()
 	if err := child.Send(message); err != nil {
@@ -396,7 +418,7 @@ func (m *Multiplexer) routeTurnStart(message protocol.Message, threadID, ownerID
 	if preferred, ok := m.preferredThreadAccount(ownerID); ok {
 		snapshot, err := m.accountSnapshotWithProfile(ctx, preferred.ID, false)
 		if err == nil && accountHasCapacity(snapshot) {
-			if err := m.moveThreadToAccount(ctx, threadID, ownerID, preferred.ID); err != nil {
+			if err := m.moveThreadToAccountForRequest(ctx, threadID, ownerID, preferred.ID, message); err != nil {
 				if errors.Is(err, errChatActive) {
 					if err := m.forward(ownerID, message); err != nil {
 						m.write(protocol.Failure(message.ID, -32023, err.Error()))
@@ -475,7 +497,7 @@ func (m *Multiplexer) failoverTurn(
 		m.write(m.allSubscriptionsDepleted(ctx, message.ID))
 		return
 	}
-	if err := m.moveThreadToAccount(ctx, threadID, sourceAccountID, fallback.ID); err != nil {
+	if err := m.moveThreadToAccountForRequest(ctx, threadID, sourceAccountID, fallback.ID, message); err != nil {
 		m.write(protocol.Failure(message.ID, -32027, fmt.Sprintf("move chat to %s: %v", fallback.Label, err)))
 		return
 	}
@@ -493,6 +515,19 @@ func (m *Multiplexer) failoverTurn(
 
 func (m *Multiplexer) moveThreadToAccount(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
 	return m.moveThreadWithGoal(ctx, threadID, sourceAccountID, targetAccountID)
+}
+
+func (m *Multiplexer) moveThreadToAccountForRequest(
+	ctx context.Context,
+	threadID string,
+	sourceAccountID string,
+	targetAccountID string,
+	message protocol.Message,
+) error {
+	if requestExplicitlyUsesNativeModel(message) {
+		return m.moveThreadWithGoalOptions(ctx, threadID, sourceAccountID, targetAccountID, true)
+	}
+	return m.moveThreadToAccount(ctx, threadID, sourceAccountID, targetAccountID)
 }
 
 func (m *Multiplexer) moveThreadToAccountWithResume(
@@ -515,6 +550,14 @@ func (m *Multiplexer) moveThreadToAccountWithResume(
 }
 
 func (m *Multiplexer) resumeThreadOnAccount(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
+	return m.resumeThreadOnAccountWithOptions(ctx, threadID, sourceAccountID, targetAccountID, false)
+}
+
+func (m *Multiplexer) resumeThreadOnAccountAllowChatGPTWebSource(ctx context.Context, threadID, sourceAccountID, targetAccountID string) error {
+	return m.resumeThreadOnAccountWithOptions(ctx, threadID, sourceAccountID, targetAccountID, true)
+}
+
+func (m *Multiplexer) resumeThreadOnAccountWithOptions(ctx context.Context, threadID, sourceAccountID, targetAccountID string, allowChatGPTWebSource bool) error {
 	m.migrationMu.Lock()
 	if m.migrating == nil {
 		m.migrating = make(map[string]bool)
@@ -541,13 +584,14 @@ func (m *Multiplexer) resumeThreadOnAccount(ctx context.Context, threadID, sourc
 	if err := refreshSignedInSubscription(ctx, target); err != nil {
 		return err
 	}
-	return resumeThreadBetweenAccounts(
+	return resumeThreadBetweenAccountsWithOptions(
 		ctx,
 		threadID,
 		sourceAccount.CodexHome,
 		targetAccount.CodexHome,
 		source,
 		target,
+		threadMigrationOptions{allowChatGPTWebSource: allowChatGPTWebSource},
 	)
 }
 
@@ -603,7 +647,7 @@ func (m *Multiplexer) handleInbound(inbound backend.Inbound) {
 		}
 		m.externalMu.Unlock()
 		if ok {
-			if (route.method == "turn/start" || startsGoal(route.message)) && isUsageLimitResponse(message) {
+			if !route.chatGPTWeb && (route.method == "turn/start" || startsGoal(route.message)) && isUsageLimitResponse(message) {
 				go m.retryTurnAfterUsageLimit(route, inbound.AccountID)
 				return
 			}
@@ -718,6 +762,7 @@ func (m *Multiplexer) learnThreadOwner(route externalRoute, accountID string, re
 	switch route.method {
 	case "thread/start", "thread/fork", "thread/resume", "thread/unarchive":
 		if threadID := threadIDFromResult(result); threadID != "" {
+			m.rememberThreadModelFamily(threadID, route.chatGPTWeb)
 			_ = m.store.LearnThreadOwner(threadID, accountID)
 		}
 	}
